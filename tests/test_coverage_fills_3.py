@@ -157,14 +157,13 @@ def test_download_without_content_length_still_works(tmp_path, monkeypatch):
 
 
 def test_resolve_data_path_downloads_and_verifies(tmp_path, monkeypatch):
-    """End-to-end: file not in staging, not in cache → download + SHA."""
+    """End-to-end: file not in cache → download + SHA verify."""
     import hashlib
     from monocle2py import _download as dl
 
     payload = b"resolve-download-payload"
     sha = hashlib.sha256(payload).hexdigest()
 
-    monkeypatch.setattr(dl, "_PKG_ROOT", tmp_path / "pkg_root")
     monkeypatch.setattr(dl, "REGISTRY", {
         "foo.h5ad": {"url": "http://example.com/foo", "sha256": sha},
     })

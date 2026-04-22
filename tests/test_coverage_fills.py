@@ -726,65 +726,25 @@ def test_ensure_state_rejects_non_dict_payload() -> None:
 
 
 def test_resolve_data_path_unknown_file_raises(tmp_path, monkeypatch) -> None:
-    """If a file isn't in the registry and not on disk, raise
-    ``FileNotFoundError`` with a helpful message."""
+    """A filename not in ``REGISTRY`` raises ``FileNotFoundError``."""
     from monocle2py import _download as dl
 
-    # Point _PKG_ROOT / DATA_DIR_NAME / cache to tmp_path to guarantee misses.
-    monkeypatch.setattr(dl, "_PKG_ROOT", tmp_path / "pkg_root")
     monkeypatch.setattr(dl, "REGISTRY", {})
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
 
-    with pytest.raises(FileNotFoundError, match="registry"):
+    with pytest.raises(FileNotFoundError, match="not registered"):
         dl.resolve_data_path("never_exists.h5ad")
 
 
-def test_resolve_data_path_registry_without_url_raises(
-    tmp_path, monkeypatch,
-) -> None:
-    """An entry without a ``url`` can't be downloaded."""
-    from monocle2py import _download as dl
-
-    monkeypatch.setattr(dl, "_PKG_ROOT", tmp_path / "pkg_root")
-    monkeypatch.setattr(dl, "REGISTRY", {"foo.h5ad": {"sha256": "abc"}})
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-
-    with pytest.raises(FileNotFoundError, match="download URL"):
-        dl.resolve_data_path("foo.h5ad")
-
-
-def test_resolve_data_path_prefers_local_staging(
-    tmp_path, monkeypatch,
-) -> None:
-    """If ``<pkg_root_parent>/monocle2_data/<file>`` exists, it's used
-    directly without touching the cache or network."""
-    from monocle2py import _download as dl
-
-    pkg_root = tmp_path / "pkg_root"
-    data_dir = tmp_path / dl.DATA_DIR_NAME
-    data_dir.mkdir(parents=True)
-    staged = data_dir / "local.h5ad"
-    staged.write_bytes(b"stub")
-
-    monkeypatch.setattr(dl, "_PKG_ROOT", pkg_root)
-    resolved = dl.resolve_data_path("local.h5ad")
-    assert resolved == staged
-
-
 def test_resolve_data_path_uses_cache_copy(tmp_path, monkeypatch) -> None:
-    """Second resolution pulls from the user cache when staging is
-    missing — exercise the ``cached.exists()`` branch."""
+    """Existing cache copy short-circuits the download."""
     from monocle2py import _download as dl
 
-    monkeypatch.setattr(dl, "_PKG_ROOT", tmp_path / "pkg_root")
     home = tmp_path / "home"
     cache_dir = home / ".cache" / dl.CACHE_DIR_NAME
     cache_dir.mkdir(parents=True)
     cached = cache_dir / "cached.h5ad"
     cached.write_bytes(b"cached")
-    monkeypatch.setenv("HOME", str(home))
-
-    # patch Path.home() since the resolver looks up the cache via that call
     monkeypatch.setattr("pathlib.Path.home", lambda: home)
 
     resolved = dl.resolve_data_path("cached.h5ad")

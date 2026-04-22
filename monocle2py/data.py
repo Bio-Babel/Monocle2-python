@@ -1,7 +1,7 @@
 """Public data loaders for monocle2 tutorial fixtures.
 
-All loaders resolve data via the three-tier strategy defined in
-``_download.py`` (cwd-local staging → user cache → registry download).
+All loaders resolve data via ``_download.resolve_data_path``: user cache
+first, then Zenodo download (see ``_registry.REGISTRY``).
 """
 
 from __future__ import annotations
