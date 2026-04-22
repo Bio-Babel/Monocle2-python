@@ -96,3 +96,6 @@ exclude = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow integration tests (deselect with '-m \"not slow\"')",
+]

@@ -90,10 +90,11 @@ def test_plot_cell_trajectory_with_markers_gradient():
 
 
 def test_plot_cell_trajectory_requires_reduce_dimension():
+    gene_ids = [f"G{i}" for i in range(3)]
     cds = new_cell_dataset(
         np.zeros((4, 3)),
         pheno_data=pd.DataFrame(index=[f"C{i}" for i in range(4)]),
-        feature_data=pd.DataFrame(index=[f"G{i}" for i in range(3)]),
+        feature_data=pd.DataFrame({"gene_short_name": gene_ids}, index=gene_ids),
         lower_detection_limit=1.0,
     )
     with pytest.raises(RuntimeError, match="Reduced dimensions missing"):

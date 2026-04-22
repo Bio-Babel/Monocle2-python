@@ -254,9 +254,10 @@ def test_tobit_family_survives_h5ad_roundtrip(tmp_path) -> None:
 
     rng = np.random.default_rng(0)
     X = rng.random((10, 6)) * 5.0
+    gene_ids = [f"G{i}" for i in range(6)]
     cds = new_cell_dataset(
         X, pheno_data=pd.DataFrame(index=[f"C{i}" for i in range(10)]),
-        feature_data=pd.DataFrame(index=[f"G{i}" for i in range(6)]),
+        feature_data=pd.DataFrame({"gene_short_name": gene_ids}, index=gene_ids),
         lower_detection_limit=0.1,
         expression_family=tobit(lower=0.37, upper=12.5),
     )
