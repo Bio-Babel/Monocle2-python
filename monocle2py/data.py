@@ -1,15 +1,12 @@
 """Public data loaders for monocle2 tutorial fixtures.
 
-These loaders resolve data via the three-tier strategy defined in
+All loaders resolve data via the three-tier strategy defined in
 ``_download.py`` (cwd-local staging → user cache → registry download).
-Bundled resources live in ``monocle2py/resources/`` and are read with
-``importlib.resources``.
 """
 
 from __future__ import annotations
 
 import json
-from importlib import resources
 from typing import Any
 
 import anndata as ad
@@ -97,7 +94,7 @@ def load_fig1b_ordering_genes() -> pd.DataFrame:
 
 
 def load_paul_gene_set() -> dict[str, list[str]]:
-    """Load the Paul branch-analysis gene panels bundled with the package.
+    """Load the Paul branch-analysis gene panels from the Zenodo record.
 
     Returns
     -------
@@ -107,8 +104,7 @@ def load_paul_gene_set() -> dict[str, list[str]]:
         The misspelling ``negtive_score_genes`` is preserved to match the
         tutorial code.
     """
-    with resources.files("monocle2py.resources").joinpath(
-        "paul_gene_set.json"
-    ).open("r") as fh:
+    path = resolve_data_path("paul_gene_set.json")
+    with open(path, "r") as fh:
         data: dict[str, Any] = json.load(fh)
     return {k: list(v) for k, v in data.items()}

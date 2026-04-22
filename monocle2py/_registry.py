@@ -31,4 +31,8 @@ REGISTRY: dict[str, dict[str, str]] = {
         "url": "https://sandbox.zenodo.org/records/491746/files/paul_cds.h5ad?download=1",
         "sha256": "ba51425c412e84d35e59544b15e08716b79caf47223396d68802eedacb3e3bb5",
     },
+    "paul_gene_set.json": {
+        "url": "https://sandbox.zenodo.org/records/491746/files/paul_gene_set.json?download=1",
+        "sha256": "bd1642da89f51c6544ceef7a06052c6dca9973c74a46157e4b0e3562c3cb9d4a",
+    },
 }
