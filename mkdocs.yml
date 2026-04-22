@@ -1,0 +1,27 @@
+site_name: monocle2py
+use_directory_urls: false
+theme:
+  name: material
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: numpy
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+  - mkdocs-jupyter:
+      include_source: true
+
+nav:
+  - Home: index.md
+  - API Reference: api.md
+  - Tutorials:
+      - V2_1 HSMM: tutorials/V2_1_HSMM.ipynb
+      - V2_2 Lung BEAM: tutorials/V2_2_lung_BEAM.ipynb
+      - V2_3 Olsson: tutorials/V2_3_Olsson.ipynb
+      - V2_4 Paul: tutorials/V2_4_Paul.ipynb
