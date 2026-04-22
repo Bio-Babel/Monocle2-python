@@ -78,6 +78,51 @@ def test_tsne_runs_and_stores_state() -> None:
     assert cds.uns["monocle2"]["dim_reduce_type"] == "tSNE"
 
 
+def test_ddrtree_backend_numpy_is_default() -> None:
+    """Explicit ``backend='numpy'`` must match the default path bit-for-bit."""
+    cds_default = _branching_cds()
+    cds_numpy = _branching_cds()
+    estimate_size_factors(cds_default)
+    estimate_size_factors(cds_numpy)
+
+    reduce_dimension(cds_default, max_components=2, reduction_method="DDRTree",
+                     auto_param_selection=False, max_iter=5)
+    reduce_dimension(cds_numpy, max_components=2, reduction_method="DDRTree",
+                     auto_param_selection=False, max_iter=5, backend="numpy")
+
+    np.testing.assert_array_equal(cds_default.obsm["X_dr"], cds_numpy.obsm["X_dr"])
+
+
+def test_ddrtree_forwards_backend_kwargs(monkeypatch) -> None:
+    """``backend`` is passed explicitly; ``mst_algorithm`` / ``device`` /
+    ``dtype`` flow through ``**kwargs`` into ``ddrtree.DDRTree``."""
+    from monocle2py import dim_reduction as _dr
+
+    captured: dict[str, object] = {}
+
+    def _fake_DDRTree(X, **kw):
+        captured["kwargs"] = kw
+        orig = _real_DDRTree(X, **{k: v for k, v in kw.items()
+                                   if k not in {"device", "dtype", "mst_algorithm"}})
+        return orig
+
+    _real_DDRTree = _dr._ddrtree.DDRTree
+    monkeypatch.setattr(_dr._ddrtree, "DDRTree", _fake_DDRTree)
+
+    cds = _branching_cds()
+    estimate_size_factors(cds)
+    reduce_dimension(
+        cds, max_components=2, reduction_method="DDRTree",
+        auto_param_selection=False, max_iter=5,
+        backend="numpy", mst_algorithm="prim", device="cpu", dtype="float64",
+    )
+    kw = captured["kwargs"]
+    assert kw["backend"] == "numpy"
+    assert kw["mst_algorithm"] == "prim"
+    assert kw["device"] == "cpu"
+    assert kw["dtype"] == "float64"
+
+
 def test_unsupported_method_errors() -> None:
     cds = _branching_cds(n_cells_per_branch=5, n_genes=20)
     estimate_size_factors(cds)

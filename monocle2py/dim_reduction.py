@@ -250,8 +250,10 @@ def _ddr_kwargs(extra: dict[str, Any]) -> dict[str, Any]:
         "lambda": "lambda_",
     }
     out: dict[str, Any] = {}
-    allowed = {"initial_method", "max_iter", "sigma", "lambda_",
-               "gamma", "tol"}
+    allowed = {
+        "initial_method", "max_iter", "sigma", "lambda_", "gamma", "tol",
+        "device", "dtype", "mst_algorithm",
+    }
     for k, v in extra.items():
         key = rename.get(k, k)
         if key in allowed:
@@ -267,6 +269,7 @@ def _reduce_ddrtree(
     extra_arguments: dict[str, Any],
     verbose: bool,
     gene_mask: np.ndarray | None,
+    backend: str = "numpy",
 ) -> None:
     """DDRTree branch: call ddrtree.DDRTree and store outputs."""
     n_cells = FM.shape[1]
@@ -282,6 +285,7 @@ def _reduce_ddrtree(
         dimensions=max_components,
         ncenter=ncenter,
         verbose=verbose,
+        backend=backend,
         **kwargs,
     )
     store_ddrtree_result(adata, result, gene_mask=gene_mask)
@@ -300,6 +304,7 @@ def reduce_dimension(
     scaling: bool = True,
     num_dim: int = 50,
     random_state: int = 2016,
+    backend: str = "numpy",
     **kwargs: Any,
 ) -> AnnData:
     """Project cells into a low-dimensional space (DDRTree or tSNE).
@@ -336,10 +341,16 @@ def reduce_dimension(
         PCA components used upstream of TSNE.
     random_state : int, default 2016
         Seed for the stochastic components (matches R's ``set.seed(2016)``).
+    backend : str, default ``"numpy"``
+        Computational backend forwarded to ``ddrtree.DDRTree``. ``"numpy"``
+        is the reference path and matches R. Backend-specific tuning knobs
+        (``device``, ``dtype``, ``mst_algorithm``) flow through ``**kwargs``
+        to DDRTree. Ignored when ``reduction_method="tSNE"``.
     **kwargs
         Extra keyword arguments forwarded to the chosen reduction backend.
         For DDRTree: ``ncenter``, ``initial_method``, ``maxIter``, ``sigma``,
-        ``lambda`` / ``lambda_``, ``param.gamma`` / ``gamma``, ``tol``.
+        ``lambda`` / ``lambda_``, ``param.gamma`` / ``gamma``, ``tol``, plus
+        backend-specific knobs ``device``, ``dtype``, ``mst_algorithm``.
         For tSNE: any other ``sklearn.manifold.TSNE`` kwarg.
 
     Returns
@@ -377,7 +388,7 @@ def reduce_dimension(
             adata, FM, max_components=max_components,
             auto_param_selection=auto_param_selection,
             extra_arguments=dict(kwargs), verbose=verbose,
-            gene_mask=gene_mask,
+            gene_mask=gene_mask, backend=backend,
         )
     else:
         raise ValueError(
