@@ -63,7 +63,7 @@ def plot_rho_delta(
     rho = adata.obs["rho"].to_numpy(dtype=float)
     delta = adata.obs["delta"].to_numpy(dtype=float)
     if rho_threshold is not None and delta_threshold is not None:
-        peaks = (rho >= rho_threshold) & (delta >= delta_threshold)
+        peaks = (rho > rho_threshold) & (delta > delta_threshold)
     else:
         peaks = adata.obs["peaks"].to_numpy(dtype=bool)
     df = pd.DataFrame({
@@ -147,7 +147,7 @@ def plot_cell_clusters(
             f"Reduced space has {Z.shape[1]} components; need at least {max(x, y)}."
         )
 
-    obs = adata.obs.copy()
+    obs = adata.obs.reset_index(drop=True)
     cell_df = pd.DataFrame({
         "data_dim_1": Z[:, x - 1],
         "data_dim_2": Z[:, y - 1],
@@ -155,7 +155,7 @@ def plot_cell_clusters(
     })
     for col in obs.columns:
         if col not in cell_df.columns:
-            cell_df[col] = obs[col].to_numpy()
+            cell_df[col] = obs[col]
 
     markers_df = None
     if markers is not None:

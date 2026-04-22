@@ -24,12 +24,23 @@ def pairwise_distance_matrix(points: np.ndarray) -> np.ndarray:
     return np.sqrt(np.einsum("ijk,ijk->ij", diff, diff))
 
 
-def _sparse_to_edge_arrays(tree: csr_matrix) -> tuple[np.ndarray, np.ndarray]:
-    """Unique undirected edge list from a (possibly symmetric) MST sparse matrix."""
+def _sparse_to_edge_arrays(
+    tree: csr_matrix, squared: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Unique undirected edge list from a (possibly symmetric) MST sparse matrix.
+
+    When ``squared=True`` the input weights are squared Euclidean distances
+    (as stored by ``ddrtree.DDRTree`` in its ``stree`` attribute); they are
+    converted to true Euclidean distances via ``sqrt``. For ``scipy``-built
+    MSTs on a Euclidean distance matrix the weights are already sqrt-ed and
+    the default ``squared=False`` leaves them untouched.
+    """
     coo = tree.tocoo()
     mask = coo.row < coo.col
     edges = np.column_stack([coo.row[mask], coo.col[mask]]).astype(np.int64)
     weights = np.asarray(coo.data[mask], dtype=np.float64)
+    if squared:
+        weights = np.sqrt(weights)
     return edges, weights
 
 
@@ -85,7 +96,10 @@ def store_ddrtree_result(
 
     adata.obsm["X_dr"] = Z.T  # cells x dim
 
-    mst_edges, mst_weights = _sparse_to_edge_arrays(result.stree)
+    # ``ddrtree.DDRTreeResult.stree`` stores squared Euclidean distances
+    # (see the essentials doc §2.3). Take sqrt so downstream consumers
+    # like ``ordering._tree_diameter`` see real Euclidean lengths.
+    mst_edges, mst_weights = _sparse_to_edge_arrays(result.stree, squared=True)
 
     ddrtree_state = {
         "K": Y,

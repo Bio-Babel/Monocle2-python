@@ -178,9 +178,12 @@ def plot_multiple_branches_pseudotime(
         raise RuntimeError("No cells on any of the requested branches.")
     long_df = pd.concat(cell_long_frames, ignore_index=True)
 
-    pseudocount = 1.0
-    if norm_method == "log":
-        long_df["expression"] = np.log10(long_df["expression"].to_numpy(float) + pseudocount)
+    # R's plot_multiple_branches_pseudotime (plotting.R:2714-2715) has a dead
+    # log2(tmp+1) line overwritten by the raw melt on the next line, so the
+    # plotted data ends up as raw lowess-smoothed values; `norm_method='log'`
+    # only affects the unused `m` matrix. Replicate that here: accept the
+    # argument for API parity but do not apply it to the plot data.
+    _ = norm_method  # intentionally unused; mirrors R's dead-code branch
 
     if min_expr is None:
         min_expr = get_lower_detection_limit(adata)

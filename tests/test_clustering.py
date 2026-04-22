@@ -85,3 +85,22 @@ def test_plot_rho_delta_requires_clustering() -> None:
     adata = _four_blobs(n_per_blob=10)
     with pytest.raises(RuntimeError, match="cluster_cells"):
         plot_rho_delta(adata)
+
+
+def test_plot_rho_delta_threshold_matches_cluster_cells() -> None:
+    """``plot_rho_delta`` must use the same strict ``>`` peak rule as
+    ``cluster_cells`` (and R's ``densityClust::findClusters`` at
+    ``which(x$rho > rho & x$delta > delta)``). The peak mask produced
+    from threshold overrides must agree with the one ``cluster_cells``
+    stored."""
+    adata = _four_blobs(n_per_blob=30)
+    rho_thr = 0.0
+    delta_thr = 5.0
+    cluster_cells(adata, rho_threshold=rho_thr, delta_threshold=delta_thr)
+    stored = adata.obs["peaks"].to_numpy(dtype=bool)
+    # Recompute the plot-side mask directly from rho/delta via the plot
+    # function's threshold override. The returned plot embeds the mask;
+    # we instead grab it from the DataFrame inside.
+    g = plot_rho_delta(adata, rho_threshold=rho_thr, delta_threshold=delta_thr)
+    plot_mask = g.data["peaks"].to_numpy(dtype=bool)
+    assert np.array_equal(stored, plot_mask)

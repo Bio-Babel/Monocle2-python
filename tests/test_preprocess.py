@@ -87,3 +87,48 @@ def test_unknown_method_rejected() -> None:
     cds = _random_cds()
     with pytest.raises(ValueError):
         estimate_size_factors(cds, method="bogus")
+
+
+def test_estimate_dispersions_group_by_matches_r_gold() -> None:
+    """Port of R ``estimateDispersions(cds, modelFormulaStr="~CellType")``
+    (``expr_models.R:515-522``). Runs ``disp_calc_helper_NB`` per unique
+    covariate level, concatenates the per-group ``(gene_id, mu, disp)``
+    rows into a pooled table, then fits a single Gamma/identity curve on
+    the pooled rows.
+
+    Fixture recorded from R monocle v2.14 on 2026-04-22:
+    asymptDisp=0.4108393, extraPois=0.1068619, disp_table rows=150."""
+    from pathlib import Path
+    from monocle2py import negbinomial_size
+    from monocle2py._uns import get_disp_fit_info
+
+    fix_dir = Path(__file__).parent / "_fixtures"
+    if not (fix_dir / "disp_groupby_gold.txt").exists():
+        pytest.skip("R gold fixture not generated yet")
+    counts = pd.read_csv(fix_dir / "disp_groupby_counts.csv", index_col=0)
+    pheno = pd.read_csv(fix_dir / "disp_groupby_pheno.csv", index_col=0)
+    X = counts.to_numpy().astype(float)
+    var = pd.DataFrame({"gene_short_name": counts.columns.tolist()},
+                       index=counts.columns)
+    cds = new_cell_dataset(
+        X, pheno_data=pheno, feature_data=var, lower_detection_limit=0.5,
+        expression_family=negbinomial_size(),
+    )
+    estimate_size_factors(cds)
+    estimate_dispersions(cds, model_formula_str="~CellType")
+    info = get_disp_fit_info(cds, "blind")
+
+    gold = dict(
+        line.strip().split("=", 1)
+        for line in (fix_dir / "disp_groupby_gold.txt").read_text().splitlines()
+        if "=" in line
+    )
+    np.testing.assert_allclose(
+        info["coefficients"]["asymptDisp"], float(gold["asymptDisp"]),
+        rtol=0, atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        info["coefficients"]["extraPois"], float(gold["extraPois"]),
+        rtol=0, atol=1e-6,
+    )
+    assert len(info["disp_table"]) == int(gold["rows"])

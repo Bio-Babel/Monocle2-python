@@ -9,6 +9,7 @@ across the ``OK`` subset.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Iterable, Sequence
 
 import numpy as np
@@ -26,11 +27,17 @@ from ._internal._formula import (
 from ._internal._vgam import (
     FitOutcome,
     calculate_nb_dispersion_hint,
+    LOG10_RESPONSE_FAMILIES,
+    _SuppressWarnings,
     fit_glm,
+    fit_glm_with_fallback,
+    fit_joint_nb,
+    fit_tobit,
     lrt,
     make_family,
     make_response,
 )
+from .families import Negbinomial, NegbinomialSize, Tobit
 from ._uns import (
     SIZE_FACTOR_COL,
     get_disp_fit_info,
@@ -69,43 +76,118 @@ def _validate_terms(formula_strs: Sequence[str], obs: pd.DataFrame) -> None:
 def _gene_dispersion_alpha(
     disp_func,
     x_orig: np.ndarray,
-    family_name: str,
-    default_alpha: float,
+    family: Any,
 ) -> float:
+    """Resolve the NB dispersion ``alpha`` for a single gene.
+
+    Mirrors R's ``fit_model_helper`` (``expr_models.R:25-44``):
+      1. If ``disp_func`` is available and returns a valid positive
+         value, override with ``alpha = disp_func(mean(round(orig_x)))``.
+      2. Otherwise honour the family-supplied ``size`` (for
+         ``NegbinomialSize``), yielding ``alpha = 1/size``. A ``size =
+         inf`` produces ``alpha = 0``, which triggers a Poisson fit in
+         :func:`make_family` (matches VGAM ``negbinomial.size(size=Inf)``).
+      3. For ``Negbinomial`` (no ``.size``) return a seed alpha; joint
+         MLE takes over via :func:`fit_joint_nb`.
+    """
+    family_name = family.vfamily
     if family_name not in ("negbinomial", "negbinomial.size"):
-        return default_alpha
+        return 1.0
     hint = calculate_nb_dispersion_hint(disp_func, np.round(x_orig))
-    if hint is None or hint <= 0:
-        return default_alpha
-    return float(hint)
+    if hint is not None and hint > 0:
+        return float(hint)
+    if isinstance(family, NegbinomialSize):
+        size = float(family.size)
+        if not math.isfinite(size) or size <= 0:
+            return 0.0  # Poisson degeneracy
+        return 1.0 / size
+    # Negbinomial (joint estimation): arbitrary seed
+    return 1.0
 
 
 def _fit_one_gene(
     x: np.ndarray,
     full_X: np.ndarray,
     reduced_X: np.ndarray,
-    family_name: str,
+    family: Any,
     disp_func,
     relative_expr: bool,
     size_factor: np.ndarray,
     verbose: bool,
 ) -> FitOutcome:
+    # Mirror R ``fit_model_helper``'s ``suppressWarnings`` wrapper
+    # (``expr_models.R:48-82``). We already suppress inside
+    # ``fit_glm`` / ``fit_joint_nb`` / ``fit_tobit``, but downstream
+    # consumers of the returned fit — ``lrt`` (reads ``.llf``) and any
+    # ``.predict`` / ``.fittedvalues`` access — also emit RuntimeWarnings
+    # from ``statsmodels.genmod.families.family.loglike_obs`` (NB /
+    # Poisson log(0*mu)) on degenerate genes. R's ``suppressWarnings``
+    # wraps the *whole* per-gene expression, so we mirror that by
+    # extending suppression across the entire per-gene body.
+    with _SuppressWarnings():
+        return _fit_one_gene_inner(
+            x, full_X, reduced_X, family, disp_func,
+            relative_expr, size_factor, verbose,
+        )
+
+
+def _fit_one_gene_inner(
+    x: np.ndarray,
+    full_X: np.ndarray,
+    reduced_X: np.ndarray,
+    family: Any,
+    disp_func,
+    relative_expr: bool,
+    size_factor: np.ndarray,
+    verbose: bool,
+) -> FitOutcome:
+    family_name = family.vfamily
     y = make_response(x, family_name, size_factor, relative_expr)
-    alpha = _gene_dispersion_alpha(disp_func, x, family_name, default_alpha=1.0)
-    family = make_family(family_name, alpha=alpha)
+    alpha = _gene_dispersion_alpha(disp_func, x, family)
+    # For VGAM ``negbinomial()`` (no ``.size``): jointly estimate (mu, size)
+    # using statsmodels.discrete.NegativeBinomial, matching R's
+    # ``negbinomial(isize=1/alpha)`` (expr_models.R:40).
+    if isinstance(family, Negbinomial):
+        try:
+            full_fit = fit_joint_nb(y, full_X, start_alpha=alpha)
+            reduced_fit = fit_joint_nb(y, reduced_X, start_alpha=alpha)
+        except Exception as exc:
+            if verbose:
+                print(f"joint NB fit failed: {exc}")
+            return FitOutcome(status="FAIL", family=family_name, pval=1.0)
+    elif isinstance(family, Tobit):
+        # Mirrors R's ``VGAM::vglm(log10(x) ~ ..., family=tobit(Lower, Upper))``
+        # (expr_models.R:45-55). The ``tryCatch`` around ``vglm`` in R's
+        # ``fit_model_helper`` returns ``NULL`` for Tobit on error — match
+        # that here by converting to FitOutcome(FAIL).
+        try:
+            full_fit = fit_tobit(y, full_X, lower=family.lower, upper=family.upper)
+            reduced_fit = fit_tobit(
+                y, reduced_X, lower=family.lower, upper=family.upper,
+            )
+        except Exception as exc:
+            if verbose:
+                print(f"tobit fit failed: {exc}")
+            return FitOutcome(status="FAIL", family=family_name, pval=1.0)
+    else:
+        sm_family = make_family(family_name, alpha=alpha)
+        full_fit = fit_glm_with_fallback(y, full_X, sm_family, family_name)
+        reduced_fit = fit_glm_with_fallback(y, reduced_X, sm_family, family_name)
+    if full_fit is None or reduced_fit is None:
+        if verbose:
+            print(f"gene fit failed for family={family_name}")
+        return FitOutcome(status="FAIL", family=family_name, pval=1.0)
     try:
-        full_fit = fit_glm(y, full_X, family)
-        reduced_fit = fit_glm(y, reduced_X, family)
         stat, dof, pval = lrt(full_fit, reduced_fit)
-        if np.isnan(pval):
-            return FitOutcome(status="FAIL", family=family_name, pval=1.0,
-                              statistic=stat, df=dof)
-        return FitOutcome(status="OK", family=family_name, pval=float(pval),
-                          statistic=stat, df=dof)
     except Exception as exc:
         if verbose:
             print(exc)
         return FitOutcome(status="FAIL", family=family_name, pval=1.0)
+    if np.isnan(pval):
+        return FitOutcome(status="FAIL", family=family_name, pval=1.0,
+                          statistic=stat, df=dof)
+    return FitOutcome(status="OK", family=family_name, pval=float(pval),
+                      statistic=stat, df=dof)
 
 
 def differential_gene_test(
@@ -168,7 +250,7 @@ def differential_gene_test(
     gene_ids = adata.var_names.astype(str).to_numpy()
     for i in range(adata.n_vars):
         out = _fit_one_gene(
-            X[:, i], full_X, reduced_X, family.vfamily, disp_func,
+            X[:, i], full_X, reduced_X, family, disp_func,
             relative_expr, sfs, verbose,
         )
         records.append({
@@ -225,14 +307,23 @@ def fit_models(
     for i, gene in enumerate(adata.var_names.astype(str)):
         x = expr[:, i]
         y = make_response(x, family.vfamily, sfs, relative_expr)
-        alpha = _gene_dispersion_alpha(
-            disp_func, x, family.vfamily, default_alpha=1.0
-        )
+        alpha = _gene_dispersion_alpha(disp_func, x, family)
+        if isinstance(family, Negbinomial):
+            try:
+                out[gene] = fit_joint_nb(y, X_design, start_alpha=alpha)
+            except Exception:
+                out[gene] = None
+            continue
+        if isinstance(family, Tobit):
+            try:
+                out[gene] = fit_tobit(
+                    y, X_design, lower=family.lower, upper=family.upper,
+                )
+            except Exception:
+                out[gene] = None
+            continue
         gfamily = make_family(family.vfamily, alpha=alpha)
-        try:
-            out[gene] = fit_glm(y, X_design, gfamily)
-        except Exception:
-            out[gene] = None
+        out[gene] = fit_glm_with_fallback(y, X_design, gfamily, family.vfamily)
     return out
 
 
@@ -286,16 +377,30 @@ def response_matrix(
 
     preds: list[np.ndarray | None] = []
     names: list[str] = []
-    for name, fit in items:
-        names.append(str(name))
-        if fit is None:
-            preds.append(None)
-            continue
-        if X_new is not None:
-            mu = np.asarray(fit.predict(X_new))
-        else:
-            mu = np.asarray(fit.fittedvalues)
-        preds.append(mu)
+    # R's ``responseMatrix`` runs ``predict(x, ...)`` inside
+    # ``mclapply``; when the underlying glm is degenerate the prediction
+    # triggers GLM-family RuntimeWarnings. R's glm predict is silent on
+    # numerical edge cases, but statsmodels' NB / Poisson families emit
+    # ``log(0*mu)`` warnings via ``loglike_obs`` during predict + llf
+    # access. Wrap the consumer loop the same way ``fit_model_helper``
+    # wraps vglm (R ``expr_models.R:48-82 suppressWarnings``).
+    with _SuppressWarnings():
+        for name, fit in items:
+            names.append(str(name))
+            if fit is None:
+                preds.append(None)
+                continue
+            if X_new is not None:
+                mu = np.asarray(fit.predict(X_new))
+            else:
+                mu = np.asarray(fit.fittedvalues)
+            # R's responseMatrix (expr_models.R:158-160) inverts the log10 response
+            # transform for Gaussian/Tobit-style families. NB and uninormal paths
+            # return predictions on the response scale directly.
+            fit_family = getattr(fit, "_monocle2py_family_name", None)
+            if fit_family in LOG10_RESPONSE_FAMILIES:
+                mu = np.power(10.0, mu)
+            preds.append(mu)
 
     shapes = [p.shape[0] for p in preds if p is not None]
     if not shapes:

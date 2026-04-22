@@ -128,33 +128,73 @@ def normalize_expr_data(
     return X.T  # return as genes x cells to match R orientation
 
 
-def _apply_filters(
-    FM: np.ndarray, scaling: bool
-) -> tuple[np.ndarray, np.ndarray]:
-    """Drop zero-SD and non-finite genes; optionally z-score across cells."""
+def _drop_zero_sd(FM: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Drop rows (genes) whose biased SD across cells is zero.
+
+    Ports ``order_cells.R:1359-1361``:
+    ``xsd <- sqrt(rowMeans((FM - rowMeans(FM))^2)); FM <- FM[xsd > 0, ]``.
+    """
     row_mean = FM.mean(axis=1)
     row_sd = np.sqrt(((FM - row_mean[:, None]) ** 2).mean(axis=1))
     keep = row_sd > 0
-    FM = FM[keep]
-    gene_mask_full = keep.copy()
+    return FM[keep], keep
 
-    if scaling:
-        row_mean = FM.mean(axis=1)
-        row_sd = FM.std(axis=1, ddof=1)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            FM = (FM - row_mean[:, None]) / row_sd[:, None]
 
+def _remove_batch_effects(
+    FM: np.ndarray, adata: AnnData, residual_model_formula_str: str,
+) -> np.ndarray:
+    """Subtract non-intercept OLS effects from *FM* (genes x cells).
+
+    Ports ``order_cells.R:1363-1375``::
+
+        X.model_mat <- sparse.model.matrix(as.formula(residualModelFormulaStr),
+                                           data = pData(cds))
+        fit <- limma::lmFit(FM, X.model_mat)
+        beta <- fit$coefficients[, -1, drop = FALSE]
+        beta[is.na(beta)] <- 0
+        FM <- as.matrix(FM) - beta %*% t(X.model_mat[, -1])
+
+    ``limma::lmFit`` with default args is plain per-row OLS. The
+    NumPy analogue uses :func:`numpy.linalg.lstsq` so rank-deficient
+    design matrices degrade gracefully (R's ``beta[is.na(beta)] <- 0``
+    handles the NA case; we use ``np.nan_to_num``).
+    """
+    from ._internal._formula import build_design_matrix
+
+    X_model = build_design_matrix(
+        residual_model_formula_str, adata.obs
+    ).astype(np.float64)
+    # Per-row OLS: β.T (p x G) = lstsq(X, FM.T)
+    coef, _, _, _ = np.linalg.lstsq(X_model, FM.T, rcond=None)
+    beta = np.nan_to_num(coef.T, nan=0.0)  # (G, p)
+    if X_model.shape[1] <= 1:
+        return FM
+    return FM - beta[:, 1:] @ X_model[:, 1:].T
+
+
+def _apply_scaling(FM: np.ndarray) -> np.ndarray:
+    """Per-gene z-score (mean 0, ddof=1 SD) across cells.
+
+    Mirrors R's ``scale(Matrix::t(FM))`` in ``order_cells.R:1378``.
+    """
+    row_mean = FM.mean(axis=1)
+    row_sd = FM.std(axis=1, ddof=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return (FM - row_mean[:, None]) / row_sd[:, None]
+
+
+def _drop_nonfinite(
+    FM: np.ndarray, current_mask: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Drop rows that contain non-finite values; return updated mask.
+
+    Ports ``order_cells.R:1386``: ``FM[apply(FM, 1, function(x) all(is.finite(x))), ]``.
+    """
     finite_rows = np.all(np.isfinite(FM), axis=1)
-    FM = FM[finite_rows]
-    final_mask = np.zeros_like(gene_mask_full)
-    kept_indices = np.flatnonzero(gene_mask_full)
+    kept_indices = np.flatnonzero(current_mask)
+    final_mask = np.zeros_like(current_mask)
     final_mask[kept_indices[finite_rows]] = True
-
-    if FM.shape[0] == 0:
-        raise RuntimeError(
-            "All genes have standard deviation zero; cannot reduce dimensions."
-        )
-    return FM, final_mask
+    return FM[finite_rows], final_mask
 
 
 def _reduce_tsne(
@@ -165,11 +205,26 @@ def _reduce_tsne(
     random_state: int,
     **tsne_kwargs: Any,
 ) -> None:
-    """tSNE branch: PCA → TSNE → obsm['X_dr']."""
+    """tSNE branch: PCA → TSNE → obsm['X_dr'].
+
+    The PCA step mirrors R's ``prcomp_irlba(t(FM), center=TRUE,
+    scale.=TRUE)`` (``order_cells.R:1430-1432``) — per-gene z-score
+    (centre + ``sd`` with ddof=1) followed by a standard SVD, with PC
+    scores returned **unscaled** (``irlba_res$x`` is ``U @ diag(S)``,
+    not whitened). The earlier ``PCA(whiten=True)`` divided scores by
+    ``sqrt(eigenvalues)``, which is a different preprocessing pipeline
+    from R and affects the tSNE embedding downstream.
+    """
     n_cells = FM.shape[1]
-    n_dim = min(num_dim, min(FM.shape) - 1)
-    pca = PCA(n_components=n_dim, random_state=random_state, whiten=True)
-    top_pca = pca.fit_transform(FM.T)  # cells x n_dim
+    FM_t = FM.T.astype(np.float64)  # cells x genes
+    mu = FM_t.mean(axis=0)
+    sd = FM_t.std(axis=0, ddof=1)  # R's ``sd()``/``scale()`` use ddof=1
+    keep = sd > 0
+    FM_scaled = (FM_t[:, keep] - mu[keep]) / sd[keep]
+
+    n_dim = min(num_dim, min(FM_scaled.shape) - 1)
+    pca = PCA(n_components=n_dim, random_state=random_state)
+    top_pca = pca.fit_transform(FM_scaled)  # cells x n_dim
 
     perplexity = tsne_kwargs.pop("perplexity", min(30, max(5, (n_cells - 1) / 3)))
     tsne = TSNE(
@@ -240,6 +295,7 @@ def reduce_dimension(
     max_components: int = 2,
     reduction_method: str = "DDRTree",
     norm_method: str = "log",
+    residual_model_formula_str: str | None = None,
     pseudo_expr: float = 1.0,
     relative_expr: bool = True,
     auto_param_selection: bool = True,
@@ -261,6 +317,13 @@ def reduce_dimension(
     norm_method : str, default ``"log"``
         One of ``"log"``, ``"vstExprs"``, ``"none"`` (behaviour depends on
         the expression family; see :func:`normalize_expr_data`).
+    residual_model_formula_str : str, optional
+        R-style formula whose non-intercept effects are regressed out of
+        the normalised expression matrix before dimensionality reduction.
+        Mirrors R ``reduceDimension(residualModelFormulaStr=...)``
+        (``order_cells.R:1363-1375``), which uses ``limma::lmFit`` for a
+        per-gene OLS fit and subtracts ``beta[, -1] %*% t(X[, -1])`` from
+        ``FM``.
     pseudo_expr : float, default 1.0
         Pseudocount added before log-transform.
     relative_expr : bool, default True
@@ -294,7 +357,18 @@ def reduce_dimension(
         adata, norm_method=norm_method, pseudo_expr=pseudo_expr,
         relative_expr=relative_expr,
     )
-    FM, gene_mask = _apply_filters(FM, scaling=scaling)
+    # Pipeline order matches R ``order_cells.R:1356-1386``:
+    # normalize → drop zero-SD rows → batch removal → scale → drop non-finite.
+    FM, zero_mask = _drop_zero_sd(FM)
+    if residual_model_formula_str is not None:
+        FM = _remove_batch_effects(FM, adata, residual_model_formula_str)
+    if scaling:
+        FM = _apply_scaling(FM)
+    FM, gene_mask = _drop_nonfinite(FM, zero_mask)
+    if FM.shape[0] == 0:
+        raise RuntimeError(
+            "All genes have standard deviation zero; cannot reduce dimensions."
+        )
 
     if reduction_method == "tSNE":
         _reduce_tsne(

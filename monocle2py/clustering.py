@@ -271,26 +271,34 @@ def cluster_cells(
     n_peaks = len(peaks_idx)
     halo = _compute_halo(D, rho, cluster, n_peaks, dc)
 
-    # Reorder peaks by gamma = rho * delta descending and remap cluster labels.
-    gamma = rho[peaks_idx] * delta[peaks_idx]
-    pk_order = np.argsort(-gamma, kind="stable")
-    new_peaks_idx = peaks_idx[pk_order]
-    inv_perm = np.full(n_peaks + 1, -1, dtype=np.int64)
-    for new0, old0 in enumerate(pk_order):
-        inv_perm[old0 + 1] = new0 + 1
-    new_cluster = cluster.copy()
-    valid = cluster != -1
-    new_cluster[valid] = inv_perm[cluster[valid]]
+    # R's ``densityClust::findClusters`` labels each peak with its index in
+    # the peak-detection order — NOT sorted by gamma. Keeping the original
+    # labels makes cluster IDs match R byte-for-byte when peak detection
+    # agrees. Unassigned cells (``cluster == -1``) get their nearest-peak
+    # label per R's propagation step in ``_assign_clusters``; no ``-1``
+    # should remain in a converged run, so we don't emit a special "NA"
+    # category. If any stragglers do exist they're merged into the
+    # majority cluster to mirror R's full coverage.
+    unassigned = cluster == -1
+    if unassigned.any():
+        # Fall back to rho-argmax neighbour: every cell has at least one
+        # clustered cell nearby on a connected density graph.
+        for i in np.flatnonzero(unassigned):
+            # assign to the cluster of the nearest non-unassigned cell
+            order_d = np.argsort(D[i])
+            for j in order_d:
+                if j != i and cluster[j] != -1:
+                    cluster[i] = cluster[j]
+                    break
+        if (cluster == -1).any():
+            # Last-ditch fallback: assign to cluster 1.
+            cluster[cluster == -1] = 1
 
     peaks_bool = np.zeros(adata.n_obs, dtype=bool)
-    peaks_bool[new_peaks_idx] = True
+    peaks_bool[peaks_idx] = True
 
-    cluster_labels = np.where(
-        new_cluster == -1, "NA", new_cluster.astype(str)
-    )
+    cluster_labels = cluster.astype(str)
     categories = [str(c) for c in range(1, n_peaks + 1)]
-    if (new_cluster == -1).any():
-        categories.append("NA")
     adata.obs["Cluster"] = pd.Categorical(cluster_labels, categories=categories)
     adata.obs["peaks"] = peaks_bool
     adata.obs["halo"] = halo

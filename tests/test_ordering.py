@@ -115,6 +115,30 @@ def test_order_cells_root_state_reuses_existing_state() -> None:
     assert np.all(np.isfinite(cds.obs["Pseudotime"].to_numpy()))
 
 
+def test_order_cells_preserves_state_when_root_state_given() -> None:
+    """R's ``orderCells`` (``order_cells.R:1153-1156``) keeps ``pData$State``
+    untouched when the caller passes ``root_state`` — only ``Pseudotime`` is
+    re-derived. Mirror that: second call with ``root_state`` must leave the
+    State labels bit-identical to the first call."""
+    cds = _branching_cds()
+    estimate_size_factors(cds)
+    reduce_dimension(
+        cds, max_components=2, reduction_method="DDRTree",
+        auto_param_selection=False, max_iter=10, verbose=False,
+    )
+    order_cells(cds)
+    first_states = cds.obs["State"].to_numpy().copy()
+    first_pt = cds.obs["Pseudotime"].to_numpy().copy()
+    chosen = int(np.unique(first_states)[-1])
+    order_cells(cds, root_state=chosen)
+    second_states = cds.obs["State"].to_numpy()
+    second_pt = cds.obs["Pseudotime"].to_numpy()
+    # States unchanged (R behaviour).
+    assert np.array_equal(first_states, second_states)
+    # Pseudotime actually changed (root moved).
+    assert not np.allclose(first_pt, second_pt)
+
+
 def test_order_cells_reverse_flips_root() -> None:
     cds = _branching_cds()
     estimate_size_factors(cds)

@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Iterable, Sequence
 
 import numpy as np
+import pandas as pd
 from anndata import AnnData
 from scipy.sparse.csgraph import minimum_spanning_tree
 
@@ -239,38 +240,70 @@ def _select_root_vertex(
     adj_vert: Sequence[Sequence[tuple[int, float]]],
     reverse: bool,
 ) -> int:
+    """Pick a principal-graph root vertex that matches R's ``select_root_cell``.
+
+    R (``order_cells.R:1014-1019``) uses ``get.diameter(mst)``, then
+    ``diameter[1]`` for the default path and ``diameter[length(diameter)]``
+    for ``reverse=TRUE``. Empirically, R's ``get.diameter`` returns the
+    path from the **step-2-farthest** endpoint (the true diameter
+    endpoint found by the second BFS) to the **step-1-farthest** endpoint
+    (the first BFS seed). Our :func:`_tree_diameter` returns the path in
+    the opposite order — from step-1 to step-2 — so the first endpoint
+    Python sees is R's ``diameter[length(diameter)]``. Flip the index
+    accordingly so that ``reverse=False`` picks R's ``diameter[1]``.
+
+    Verified on the lung and Paul fixtures: Python+R pick the same
+    root Y-vertex for both ``reverse=False`` and ``reverse=True``.
+    """
     diam = _tree_diameter(adj_vert)
     if not diam:
         raise RuntimeError("Empty MST: cannot select a root vertex.")
-    return diam[-1] if reverse else diam[0]
+    return diam[0] if reverse else diam[-1]
 
 
 def _vertex_root_from_state(
     adata: AnnData,
     root_state: int,
-    adj_vert: Sequence[Sequence[tuple[int, float]]],
-    K: np.ndarray,
     closest_vertex: np.ndarray,
+    Z: np.ndarray,
+    reverse: bool,
+    prev_root_vertex: int | None = None,
 ) -> int:
-    """Re-derive the principal-graph root vertex given a user state choice."""
-    if "State" not in adata.obs.columns:
+    """Re-derive the principal-graph root vertex given a user state choice.
+
+    Ports R's ``select_root_cell`` root_state branch
+    (``order_cells.R:961-1010``):
+
+    1. Candidate cells = cells where ``obs['State'] == root_state``.
+    2. Build a **cell-level** Euclidean MST on
+       ``reducedDimS[:, candidates]`` (R uses ``reducedDimS``; Python's
+       equivalent is ``adata.obsm['X_dr']``).
+    3. ``diameter = get.diameter(sub_mst)`` → a path of candidate cells.
+    4. Pick the diameter endpoint cell by Pseudotime min/max:
+       - if a previous ``root_cell`` exists and is in ``root_state``,
+         pick the cell with **min** Pseudotime on the diameter;
+       - otherwise pick the cell with **max** Pseudotime.
+       - ``reverse=True`` forces the min-Pseudotime pick.
+    5. Return that cell's ``closest_vertex`` as the Y-level root.
+    """
+    if "State" not in adata.obs.columns or "Pseudotime" not in adata.obs.columns:
         raise RuntimeError(
-            "State has not yet been set. Call order_cells without "
-            "specifying root_state, then try this call again."
+            "State / Pseudotime have not yet been set. Call order_cells "
+            "without root_state first, then try this call again."
         )
     state_col = adata.obs["State"].astype(int).to_numpy()
     in_state = np.flatnonzero(state_col == int(root_state))
     if in_state.size == 0:
         raise RuntimeError(f"No cells for State = {root_state}")
 
-    sub_vertices = np.unique(closest_vertex[in_state])
-    if sub_vertices.size == 1:
-        return int(sub_vertices[0])
+    if in_state.size == 1:
+        return int(closest_vertex[in_state[0]])
 
-    sub_K = K[:, sub_vertices]
-    sub_dp = _pairwise(sub_K.T)
+    # Cell-level MST on reducedDimS over the in-state subset
+    sub_Z = Z[:, in_state]  # dim x k
+    sub_dp = _pairwise(sub_Z.T)
     sub_tree = minimum_spanning_tree(sub_dp).tocoo()
-    sub_adj: list[list[tuple[int, float]]] = [[] for _ in range(sub_vertices.size)]
+    sub_adj: list[list[tuple[int, float]]] = [[] for _ in range(in_state.size)]
     for r, c, w in zip(sub_tree.row, sub_tree.col, sub_tree.data):
         sub_adj[int(r)].append((int(c), float(w)))
         sub_adj[int(c)].append((int(r), float(w)))
@@ -279,12 +312,81 @@ def _vertex_root_from_state(
     if not sub_diam:
         raise RuntimeError(f"No valid root vertex for State = {root_state}")
 
-    deg_full = _degree(adj_vert)
-    for local_idx in sub_diam:
-        v = int(sub_vertices[local_idx])
-        if deg_full[v] == 1:
-            return v
-    return int(sub_vertices[sub_diam[0]])
+    pseudotime = adata.obs["Pseudotime"].to_numpy(dtype=float)
+    # Diameter endpoints are the FIRST and LAST elements (R returns the
+    # full path). Pick by min/max of pseudotime among cells on the
+    # diameter path.
+    diam_cells = in_state[np.asarray(sub_diam, dtype=np.int64)]
+    diam_pt = pseudotime[diam_cells]
+
+    use_min = bool(reverse)
+    if not use_min and prev_root_vertex is not None:
+        prev_cells = np.flatnonzero(closest_vertex == int(prev_root_vertex))
+        prev_state = state_col[prev_cells]
+        if prev_cells.size > 0 and (prev_state == int(root_state)).any():
+            use_min = True
+
+    target_idx = int(np.argmin(diam_pt)) if use_min else int(np.argmax(diam_pt))
+    chosen_cell = int(diam_cells[target_idx])
+    return int(closest_vertex[chosen_cell])
+
+
+def _pick_root_cell_from_cell_mst(
+    adata: AnnData,
+    adj_cell: Sequence[Sequence[tuple[int, float]]],
+    Z: np.ndarray,
+    closest_vertex: np.ndarray,
+    root_state: int | None,
+    reverse: bool,
+    prev_root_vertex: int | None,
+) -> int:
+    """Fallback root-cell selection mirroring R's ``select_root_cell``.
+
+    Ports ``order_cells.R:961-1023`` against the **cell-level**
+    projection tree (which ``project2MST`` installs into
+    ``minSpanningTree(cds)`` on line 1132). When the tip-leaf filter in
+    ``_order_cells_ddrtree`` yields nothing, R re-runs
+    ``select_root_cell(cds, root_state, reverse)``; this helper
+    reproduces that behaviour:
+
+    * ``root_state is None``: pick an endpoint of the weighted diameter
+      of the cell MST (``order_cells.R:1015-1020``).
+    * ``root_state`` given: build a sub-MST over cells in that state in
+      ``reducedDimS`` space, pick the diameter endpoint by Pseudotime
+      (min if ``reverse`` or the previous root lives in this state,
+      else max). Matches ``order_cells.R:961-1009`` up to the
+      DDRTree-specific closest-vertex detour (which is a no-op at the
+      cell level since we already want a cell index).
+    """
+    if root_state is None:
+        return _select_root_vertex(adj_cell, reverse=reverse)
+    state_col = adata.obs["State"].astype(int).to_numpy()
+    in_state = np.flatnonzero(state_col == int(root_state))
+    if in_state.size == 0:
+        raise RuntimeError(f"No cells for State = {root_state}")
+    if in_state.size == 1:
+        return int(in_state[0])
+    sub_Z = Z[:, in_state]
+    sub_dp = _pairwise(sub_Z.T)
+    sub_tree = minimum_spanning_tree(sub_dp).tocoo()
+    sub_adj: list[list[tuple[int, float]]] = [[] for _ in range(in_state.size)]
+    for r_, c_, w_ in zip(sub_tree.row, sub_tree.col, sub_tree.data):
+        sub_adj[int(r_)].append((int(c_), float(w_)))
+        sub_adj[int(c_)].append((int(r_), float(w_)))
+    sub_diam = _tree_diameter(sub_adj)
+    if not sub_diam:
+        raise RuntimeError(f"No valid root cell for State = {root_state}")
+    pseudotime = adata.obs["Pseudotime"].to_numpy(dtype=float)
+    diam_cells = in_state[np.asarray(sub_diam, dtype=np.int64)]
+    diam_pt = pseudotime[diam_cells]
+    use_min = bool(reverse)
+    if not use_min and prev_root_vertex is not None:
+        prev_cells = np.flatnonzero(closest_vertex == int(prev_root_vertex))
+        prev_state = state_col[prev_cells]
+        if prev_cells.size > 0 and (prev_state == int(root_state)).any():
+            use_min = True
+    target_idx = int(np.argmin(diam_pt)) if use_min else int(np.argmax(diam_pt))
+    return int(diam_cells[target_idx])
 
 
 def _order_cells_ddrtree(
@@ -308,8 +410,14 @@ def _order_cells_ddrtree(
     if root_state is None:
         root_vertex = _select_root_vertex(adj_vert, reverse=reverse)
     else:
+        prev_aux = state.get("aux_ordering", {}).get("DDRTree", {})
+        prev_root_vertex = prev_aux.get("root_vertex")
         root_vertex = _vertex_root_from_state(
-            adata, int(root_state), adj_vert, K, closest_vertex
+            adata, int(root_state), closest_vertex, Z,
+            reverse=reverse,
+            prev_root_vertex=(
+                int(prev_root_vertex) if prev_root_vertex is not None else None
+            ),
         )
 
     _, vertex_state, _ = _extract_ordering(dp_vert, adj_vert, root_vertex)
@@ -319,11 +427,28 @@ def _order_cells_ddrtree(
 
     cells_at_root = np.flatnonzero(closest_vertex == root_vertex)
     if cells_at_root.size == 0:
-        cells_at_root = np.array([0], dtype=np.int64)
+        # R ``order_cells.R:1136-1138``: when no cells map to the root
+        # Y-vertex, R reuses ``root_cell_idx`` (a Y-vertex index) as a
+        # cell-array position. Replicate that quirk so the subsequent
+        # tip-leaf filter sees the same candidate set as R.
+        cells_at_root = np.array([int(root_vertex)], dtype=np.int64)
 
     deg_cell = _degree(adj_cell)
     tip_cells = cells_at_root[deg_cell[cells_at_root] == 1]
-    root_cell = int(tip_cells[0]) if tip_cells.size else int(cells_at_root[0])
+    if tip_cells.size > 0:
+        root_cell = int(tip_cells[0])
+    else:
+        # R ``order_cells.R:1144-1146``: tip-leaf intersection is empty,
+        # fall back to ``select_root_cell`` on the cell-level projection
+        # tree (the MST ``project2MST`` installs on line 1132).
+        prev_aux = state.get("aux_ordering", {}).get("DDRTree", {})
+        prev_root_vertex = prev_aux.get("root_vertex")
+        root_cell = _pick_root_cell_from_cell_mst(
+            adata, adj_cell, Z, closest_vertex, root_state, reverse,
+            prev_root_vertex=(
+                int(prev_root_vertex) if prev_root_vertex is not None else None
+            ),
+        )
 
     pseudotime_cell, _, parents_cell = _extract_ordering(
         dp_cell, adj_cell, root_cell,
@@ -339,15 +464,49 @@ def _order_cells_ddrtree(
     )
 
     adata.obs["Pseudotime"] = pseudotime.astype(float)
-    adata.obs["State"] = state_per_cell.astype(np.int64)
+    # R's ``orderCells`` (``order_cells.R:1153-1156``) only overwrites
+    # ``State`` on the first call (``root_state is NULL``). When the user
+    # passes ``root_state`` to pivot the root, R keeps the prior State
+    # labels so downstream code (``branch_states``, plotting) can index by
+    # the original numbering. Mirror that behaviour here.
+    if root_state is None or "State" not in adata.obs.columns:
+        adata.obs["State"] = state_per_cell.astype(np.int64)
+    # R stores ``State`` as a ``factor`` (``factor(states)`` in
+    # ``extract_ddrtree_ordering``/``pq_helper``), so plotting functions
+    # that check ``class(data_df[, color_by]) == 'numeric'`` fall through
+    # to a discrete colour scale. We mirror that with ``pd.Categorical``
+    # on every order_cells call: bare ``int64`` (what h5ad stores)
+    # would trip ``is_float_dtype == False`` fine, but downstream R-like
+    # callers still want a true factor dtype. Categories are the sorted
+    # unique ints so repeated calls are idempotent.
+    state_col = adata.obs["State"]
+    if not isinstance(state_col.dtype, pd.CategoricalDtype):
+        values = state_col.to_numpy()
+        try:
+            values = values.astype(np.int64)
+        except (TypeError, ValueError):
+            pass
+        categories = np.unique(values)
+        adata.obs["State"] = pd.Categorical(values, categories=categories)
     adata.obs["Parent"] = parent_names
 
+    # R's ``auxOrderingData$DDRTree$branch_points`` holds centroid (Y-node)
+    # indices with degree>2 in the **principal-graph MST** (BEAM.R:107 reads
+    # this list). Using cell-level degrees here would change BEAM branch
+    # identification. See order_cells.R:1164 / 1177.
+    centroid_branch_points = np.flatnonzero(_degree(adj_vert) > 2).astype(
+        np.int64
+    )
     aux = ensure_state(adata).setdefault("aux_ordering", {})
     aux["DDRTree"] = {
         "root_cell": cell_names[root_cell],
         "root_vertex": int(root_vertex),
         "pr_graph_cell_proj_dist": P,
-        "branch_points": np.flatnonzero(_degree(adj_cell) > 2).astype(np.int64),
+        "branch_points": centroid_branch_points,
+        # Keep the closest-vertex lookup here too so BEAM can re-use it
+        # without digging into ``uns['monocle2']['ddrtree']``; mirrors R's
+        # ``pr_graph_cell_proj_closest_vertex`` slot.
+        "pr_graph_cell_proj_closest_vertex": closest_vertex.astype(np.int64),
     }
 
 

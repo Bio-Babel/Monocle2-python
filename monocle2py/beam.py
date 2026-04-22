@@ -1,20 +1,28 @@
 """Slice 7: BEAM — branch-dependent expression analysis.
 
 Ports ``BEAM``, ``branchTest``, ``buildBranchCellDataSet`` and ``calILRs``
-from ``monocle2/R/BEAM.R``. Requires :func:`~monocle2py.order_cells` to have
-run so ``Pseudotime``, ``State``, the principal-graph centroid MST, and the
-projected cell coordinates are available in ``adata.uns['monocle2']``.
+from ``monocle2/R/BEAM.R``. Requires :func:`~monocle2py.order_cells` to
+have run so ``Pseudotime``, ``State``, the principal-graph **centroid
+MST** (Y-node level), and the ``closest_vertex`` mapping are available in
+``adata.uns['monocle2']``.
+
+R's ``buildBranchCellDataSet`` walks the principal graph at the Y-node
+(centroid) level — *not* the cell level — and maps each Y-node back to
+the cells whose ``closest_vertex`` sits on that node. This Python port
+mirrors that choice; an earlier implementation that built a fresh
+cell×cell MST produced incorrect branch identification and
+non-deterministic A/B labelling on multifurcations.
 """
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Any, Iterable, Optional, Sequence
 
 import numpy as np
 import pandas as pd
 from anndata import AnnData
 from scipy.sparse import issparse
-from scipy.sparse.csgraph import minimum_spanning_tree
 
 from ._internal._formula import formula_terms, normalize_formula
 from ._uns import SIZE_FACTOR_COL, ensure_state, get_state
@@ -34,55 +42,62 @@ def _pairwise(points: np.ndarray) -> np.ndarray:
     return np.sqrt(np.einsum("ijk,ijk->ij", diff, diff))
 
 
-def _cell_mst_adj(
+def _centroid_mst_adj(
     adata: AnnData,
-) -> list[list[tuple[int, float]]]:
-    """Rebuild the cell-projection MST adjacency from the stored projection."""
-    aux = get_state(adata).get("aux_ordering", {}).get("DDRTree")
-    if aux is None or "pr_graph_cell_proj_dist" not in aux:
+) -> tuple[list[list[int]], np.ndarray]:
+    """Return the centroid-MST adjacency list and the ``closest_vertex`` map.
+
+    Mirrors R's ``minSpanningTree(cds)`` (under DDRTree this holds the
+    principal-graph MST over Y-nodes; ``order_cells.R:1132``) together
+    with ``pr_graph_cell_proj_closest_vertex`` (``auxOrderingData``).
+    """
+    state = get_state(adata)
+    ddr = state.get("ddrtree") or {}
+    aux = state.get("aux_ordering", {}).get("DDRTree", {})
+    if "mst_edges" not in ddr or "closest_vertex" not in ddr:
         raise RuntimeError(
-            "order_cells has not been called (missing projected coords)."
+            "order_cells has not been called under DDRTree (missing "
+            "principal-graph MST or closest-vertex mapping)."
         )
-    P = np.asarray(aux["pr_graph_cell_proj_dist"], dtype=float)  # dim x n_cells
-    dp = _pairwise(P.T)
-    nonzero = dp[dp > 0]
-    if nonzero.size:
-        dp = dp + float(nonzero.min())
-        np.fill_diagonal(dp, 0.0)
-    tree = minimum_spanning_tree(dp).tocoo()
-    n = dp.shape[0]
-    adj: list[list[tuple[int, float]]] = [[] for _ in range(n)]
-    for r, c, w in zip(tree.row, tree.col, tree.data):
-        adj[int(r)].append((int(c), float(w)))
-        adj[int(c)].append((int(r), float(w)))
-    return adj
+    K = np.asarray(ddr["K"])
+    n_centers = K.shape[1] if K.ndim == 2 else K.shape[0]
+    edges = np.asarray(ddr["mst_edges"], dtype=np.int64)
+    adj: list[list[int]] = [[] for _ in range(n_centers)]
+    for a, b in edges:
+        adj[int(a)].append(int(b))
+        adj[int(b)].append(int(a))
+    closest_vertex = np.asarray(
+        aux.get("pr_graph_cell_proj_closest_vertex", ddr["closest_vertex"]),
+        dtype=np.int64,
+    )
+    return adj, closest_vertex
 
 
-def _degree(adj: Sequence[Sequence[tuple[int, float]]]) -> np.ndarray:
+def _degree(adj: Sequence[Sequence[int]]) -> np.ndarray:
     return np.array([len(nbrs) for nbrs in adj], dtype=np.int64)
 
 
 def _path_in_tree(
-    adj: Sequence[Sequence[tuple[int, float]]], source: int, target: int,
+    adj: Sequence[Sequence[int]], source: int, target: int,
 ) -> list[int]:
-    """Unique source→target path on a tree."""
+    """Unique source→target path on a tree via BFS (order-independent)."""
     n = len(adj)
     parent = [-1] * n
     visited = np.zeros(n, dtype=bool)
-    stack = [source]
+    q = deque([source])
     visited[source] = True
-    while stack:
-        u = stack.pop()
+    while q:
+        u = q.popleft()
         if u == target:
             break
-        for v, _ in adj[u]:
+        for v in adj[u]:
             if not visited[v]:
                 visited[v] = True
                 parent[v] = u
-                stack.append(v)
+                q.append(v)
     if not visited[target]:
         return []
-    path = []
+    path: list[int] = []
     cur = target
     while cur != -1:
         path.append(cur)
@@ -92,90 +107,150 @@ def _path_in_tree(
 
 
 def _bfs_component(
-    adj: Sequence[Sequence[tuple[int, float]]], source: int, removed: int,
+    adj: Sequence[Sequence[int]], source: int, removed: int,
 ) -> set[int]:
     """Nodes reachable from *source* with *removed* excluded from the graph."""
     visited = {source}
-    stack = [source]
-    while stack:
-        u = stack.pop()
-        for v, _ in adj[u]:
+    q = deque([source])
+    while q:
+        u = q.popleft()
+        for v in adj[u]:
             if v == removed or v in visited:
                 continue
             visited.add(v)
-            stack.append(v)
+            q.append(v)
     return visited
 
 
-def _sort_branch_points_by_pseudotime(
-    branch_points: np.ndarray, pseudotime: np.ndarray,
+def _sort_branch_points_by_vertex_pseudotime(
+    branch_points: np.ndarray,
+    pseudotime: np.ndarray,
+    closest_vertex: np.ndarray,
 ) -> np.ndarray:
-    """Order branch-point cell indices by pseudotime (closest to root first)."""
-    pt = pseudotime[branch_points]
-    return branch_points[np.argsort(pt, kind="stable")]
+    """Sort centroid branch-point indices by the mean pseudotime of their cells.
+
+    R orders branch points by their position along the trajectory; in the
+    DDRTree path this is implicitly the order in which ``branch_points``
+    were populated from the principal graph. We approximate with the mean
+    pseudotime of cells whose ``closest_vertex`` is the branch point.
+    """
+    means = np.zeros(branch_points.size, dtype=float)
+    for i, v in enumerate(branch_points):
+        cells = closest_vertex == int(v)
+        means[i] = float(pseudotime[cells].mean()) if cells.any() else np.inf
+    return branch_points[np.argsort(means, kind="stable")]
 
 
 def _compute_paths_to_root(
     adata: AnnData,
-    adj_cell: Sequence[Sequence[tuple[int, float]]],
+    adj_vert: Sequence[Sequence[int]],
+    closest_vertex: np.ndarray,
     branch_states: Optional[Sequence[int]],
     branch_point: int,
 ) -> dict[str, list[int]]:
-    """Identify the two branch paths as lists of cell indices."""
-    aux = get_state(adata)["aux_ordering"]["DDRTree"]
-    root_cell = str(aux["root_cell"])
+    """Identify the two branch paths, at the **centroid** level, and map
+    each path back to the cells whose ``closest_vertex`` sits on it.
+
+    Mirrors R ``BEAM.R:73-137``:
+      1. Derive the root Y-vertex: the cells in the root state → union of
+         their ``closest_vertex`` IDs → restrict the centroid MST to those
+         IDs → pick the first degree-1 node as the root Y-vertex.
+      2. For ``branch_states`` mode (R:73-104): for each leaf state, pick
+         a tip Y-vertex among its cells' centroids, take the shortest
+         path to the root Y-vertex, and materialise the path as the union
+         of cells whose centroid is on that path.
+      3. For ``branch_point`` mode (R:106-137): pick the ``k``-th centroid
+         with degree>2, BFS its neighbours with the branch point removed,
+         and attach each non-root component (plus the path to the root) to
+         the branch keyed by the neighbour centroid ID.
+    """
+    state = get_state(adata)
+    aux = state["aux_ordering"]["DDRTree"]
+    root_cell_name = str(aux["root_cell"])
     cell_names = adata.obs_names.to_numpy()
     name_to_idx = {n: i for i, n in enumerate(cell_names)}
-    root_idx = name_to_idx[root_cell]
+    root_cell_idx = name_to_idx[root_cell_name]
+    root_state_val = int(adata.obs["State"].iloc[root_cell_idx])
+    state_col = adata.obs["State"].astype(int).to_numpy()
+    deg = _degree(adj_vert)
 
-    deg = _degree(adj_cell)
-    paths: dict[str, list[int]] = {}
+    # Root Y-vertex: first degree-1 centroid among those containing
+    # root-state cells (R:67 derives ``root_cell`` via the restricted
+    # centroid MST).
+    root_state_cells = np.flatnonzero(state_col == root_state_val)
+    root_vertices = np.unique(closest_vertex[root_state_cells])
+    root_tip_candidates = root_vertices[deg[root_vertices] == 1]
+    if root_tip_candidates.size > 0:
+        root_y = int(root_tip_candidates[0])
+    elif root_vertices.size > 0:
+        root_y = int(root_vertices[0])
+    else:
+        root_y = int(aux.get("root_vertex", 0))
 
+    paths_vertex: dict[str, list[int]] = {}
     if branch_states is not None:
-        state_col = adata.obs["State"].astype(int).to_numpy()
         for leaf_state in branch_states:
             in_state = np.flatnonzero(state_col == int(leaf_state))
             if in_state.size == 0:
                 raise RuntimeError(f"No cells in State == {leaf_state}")
-            tip_candidates = in_state[deg[in_state] == 1]
-            tip = int(tip_candidates[0]) if tip_candidates.size else int(in_state[0])
-            path = _path_in_tree(adj_cell, tip, root_idx)
+            state_verts = np.unique(closest_vertex[in_state])
+            tip_candidates = state_verts[deg[state_verts] == 1]
+            tip = int(tip_candidates[0]) if tip_candidates.size else int(
+                state_verts[0]
+            )
+            path = _path_in_tree(adj_vert, tip, root_y)
             if not path:
                 raise RuntimeError(
                     f"Could not find a path from State {leaf_state} to root"
                 )
-            paths[str(leaf_state)] = path
+            paths_vertex[str(int(leaf_state))] = path
     else:
-        branch_points_idx = np.asarray(aux["branch_points"], dtype=np.int64)
-        if branch_points_idx.size == 0:
+        branch_points_vert = np.asarray(aux["branch_points"], dtype=np.int64)
+        if branch_points_vert.size == 0:
             raise RuntimeError(
                 "No branch points detected; ensure order_cells found a "
                 "branching trajectory."
             )
         pt_all = adata.obs["Pseudotime"].to_numpy(dtype=float)
-        branch_points_idx = _sort_branch_points_by_pseudotime(
-            branch_points_idx, pt_all,
+        branch_points_vert = _sort_branch_points_by_vertex_pseudotime(
+            branch_points_vert, pt_all, closest_vertex,
         )
-        if int(branch_point) < 1 or int(branch_point) > branch_points_idx.size:
+        if int(branch_point) < 1 or int(branch_point) > branch_points_vert.size:
             raise RuntimeError(
                 f"branch_point={branch_point} is out of range "
-                f"(only {branch_points_idx.size} branch points)."
+                f"(only {branch_points_vert.size} branch points)."
             )
-        branch_cell_idx = int(branch_points_idx[int(branch_point) - 1])
-        path_to_anc = _path_in_tree(adj_cell, branch_cell_idx, root_idx)
-        path_to_anc_set = set(path_to_anc)
-        for nbr, _ in adj_cell[branch_cell_idx]:
-            descendants = _bfs_component(adj_cell, nbr, removed=branch_cell_idx)
-            if root_idx in descendants:
+        branch_y = int(branch_points_vert[int(branch_point) - 1])
+        path_to_anc_y = set(_path_in_tree(adj_vert, branch_y, root_y))
+        # Iterate the immediate neighbours in sorted order to give
+        # deterministic A/B labelling (R's iteration order is
+        # igraph-dependent; sorting on the centroid index is a stable
+        # canonicalisation that avoids the COO-order bug.)
+        #
+        # R keys the branch by the centroid's igraph vertex name
+        # (``BEAM.R:132`` uses ``backbone_nei``, which under DDRTree is
+        # ``V(minSpanningTree)$name`` == ``Y_1..Y_K``). Mirror that by
+        # converting the 0-based Python centroid index to ``Y_{i+1}``.
+        for nbr in sorted(adj_vert[branch_y]):
+            descendants = _bfs_component(adj_vert, nbr, removed=branch_y)
+            if root_y in descendants:
                 continue
-            combined = path_to_anc_set | {branch_cell_idx} | descendants
-            paths[str(cell_names[nbr])] = sorted(combined)
+            combined = path_to_anc_y | {branch_y} | descendants
+            paths_vertex[f"Y_{int(nbr) + 1}"] = sorted(combined)
 
-    if len(paths) != 2:
+    if len(paths_vertex) != 2:
         raise RuntimeError(
-            f"Expected 2 branches, got {len(paths)} "
+            f"Expected 2 branches, got {len(paths_vertex)} "
             "(buildBranchCellDataSet supports exactly two branches)."
         )
+
+    paths: dict[str, list[int]] = {}
+    for key, vert_path in paths_vertex.items():
+        vert_set = set(vert_path)
+        cells_on_path = np.flatnonzero(
+            np.isin(closest_vertex, list(vert_set))
+        )
+        paths[key] = sorted(cells_on_path.tolist())
     return paths
 
 
@@ -275,7 +350,7 @@ def _duplicate_progenitors(
 
 def build_branch_cell_dataset(
     adata: AnnData,
-    progenitor_method: str = "duplicate",
+    progenitor_method: str = "sequential_split",
     branch_states: Optional[Sequence[int]] = None,
     branch_point: int = 1,
     branch_labels: Optional[Sequence[str]] = None,
@@ -294,7 +369,11 @@ def build_branch_cell_dataset(
     ----------
     adata : anndata.AnnData
         Must have been processed with :func:`~monocle2py.order_cells`.
-    progenitor_method : {"duplicate", "sequential_split"}, default "duplicate"
+    progenitor_method : {"sequential_split", "duplicate"}, default "sequential_split"
+        Matches R's ``buildBranchCellDataSet``: the formal default
+        ``c('sequential_split', 'duplicate')`` resolves to ``sequential_split``
+        because R's ``if(x == 'duplicate')`` uses only the vector's first
+        element (``BEAM.R:26``, verified in ``monocle2`` R env).
     branch_states : sequence of int, optional
         Two state IDs specifying the two leaf branches. Overrides
         ``branch_point`` when supplied.
@@ -319,9 +398,9 @@ def build_branch_cell_dataset(
             "Please specify branch_point or branch_states"
         )
 
-    adj_cell = _cell_mst_adj(adata)
+    adj_vert, closest_vertex = _centroid_mst_adj(adata)
     paths_idx = _compute_paths_to_root(
-        adata, adj_cell, branch_states, int(branch_point),
+        adata, adj_vert, closest_vertex, branch_states, int(branch_point),
     )
 
     path_keys = list(paths_idx.keys())
@@ -405,6 +484,8 @@ def branch_test(
     branch_states: Optional[Sequence[int]] = None,
     branch_point: int = 1,
     branch_labels: Optional[Sequence[str]] = None,
+    progenitor_method: str = "sequential_split",
+    stretch: bool = True,
     relative_expr: bool = True,
     cores: int = 1,
     verbose: bool = False,
@@ -415,13 +496,20 @@ def branch_test(
     then compares the two formulas via a per-gene LRT using the Slice 6
     machinery. If ``"Branch"`` is not referenced in the full formula, the
     test runs directly on the input AnnData without duplication.
+
+    ``progenitor_method`` and ``stretch`` mirror R's ``...`` forwarding
+    (``BEAM.R:331-333``): ``branchTest`` passes through to
+    ``buildBranchCellDataSet``, so users can toggle between
+    ``"sequential_split"`` (R default) and ``"duplicate"``.
     """
     if "Branch" in formula_terms(full_model_formula_str):
         subset = build_branch_cell_dataset(
             adata,
+            progenitor_method=progenitor_method,
             branch_states=branch_states,
             branch_point=branch_point,
             branch_labels=branch_labels,
+            stretch=stretch,
         )
     else:
         subset = adata
@@ -442,6 +530,8 @@ def beam(
     branch_states: Optional[Sequence[int]] = None,
     branch_point: int = 1,
     branch_labels: Optional[Sequence[str]] = None,
+    progenitor_method: str = "sequential_split",
+    stretch: bool = True,
     relative_expr: bool = True,
     cores: int = 1,
     verbose: bool = False,
@@ -449,7 +539,10 @@ def beam(
     """Identify genes with branch-dependent expression.
 
     Calls :func:`branch_test` and returns its DataFrame joined with the
-    per-gene ``var`` columns from *adata*.
+    per-gene ``var`` columns from *adata*. ``progenitor_method`` and
+    ``stretch`` are forwarded to :func:`build_branch_cell_dataset`,
+    mirroring R's ``BEAM(..., ...)`` kwargs passthrough
+    (``BEAM.R:822-840``).
     """
     res = branch_test(
         adata,
@@ -458,6 +551,8 @@ def beam(
         branch_states=branch_states,
         branch_point=branch_point,
         branch_labels=branch_labels,
+        progenitor_method=progenitor_method,
+        stretch=stretch,
         relative_expr=relative_expr,
         cores=cores,
         verbose=verbose,

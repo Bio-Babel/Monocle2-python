@@ -12,7 +12,6 @@ from typing import Callable
 
 import numpy as np
 import pandas as pd
-import statsmodels.api as sm
 from anndata import AnnData
 from scipy.sparse import issparse
 
@@ -198,20 +197,140 @@ def _disp_calc_helper_nb(
     )
 
 
+def _glm_fit_gamma_identity(
+    X: np.ndarray,
+    y: np.ndarray,
+    start: np.ndarray,
+    epsilon: float = 1e-8,
+    maxit: int = 25,
+) -> dict:
+    """Port of R's ``glm.fit`` for ``Gamma(link="identity")``.
+
+    Uses R's deviance-based convergence criterion and its step-halving
+    safeguard so the coefficients match R's ``glm()`` to machine precision.
+
+    For the Gamma family with identity link the working response collapses
+    to ``y`` itself: ``eta = mu`` so ``d eta / d mu = 1`` and the IRLS
+    weights are ``1 / mu^2``.  The inner linear system therefore reduces
+    to a weighted-least-squares update ``(X' W X) beta = X' W y`` with
+    ``W = diag(1 / mu^2)``.
+
+    Returns a dict with the final ``params``, ``mu``, ``weights``,
+    ``deviance``, ``dispersion`` and ``converged`` flag.
+    """
+    n, p = X.shape
+    beta = np.asarray(start, dtype=float).copy()
+    mu = X @ beta
+    if np.any(mu <= 0):
+        raise RuntimeError(
+            "Parametric dispersion fit failed: start gives non-positive mu."
+        )
+
+    def _deviance(y: np.ndarray, mu: np.ndarray) -> float:
+        return 2.0 * float(np.sum(-np.log(y / mu) + (y - mu) / mu))
+
+    dev_old = _deviance(y, mu)
+    converged = False
+    for _ in range(maxit):
+        W = 1.0 / (mu * mu)
+        WX = X * W[:, None]
+        A = X.T @ WX
+        b = WX.T @ y  # z = y for the identity link
+        beta_new = np.linalg.solve(A, b)
+        mu_new = X @ beta_new
+        if np.any(mu_new <= 0):
+            step = beta_new - beta
+            for _ in range(20):
+                step = step * 0.5
+                beta_try = beta + step
+                mu_try = X @ beta_try
+                if np.all(mu_try > 0):
+                    beta_new, mu_new = beta_try, mu_try
+                    break
+            else:
+                raise RuntimeError(
+                    "Parametric dispersion fit failed: step-halving could not "
+                    "recover a positive mu."
+                )
+        dev_new = _deviance(y, mu_new)
+        beta, mu = beta_new, mu_new
+        if abs(dev_new - dev_old) / (0.1 + abs(dev_new)) < epsilon:
+            converged = True
+            dev_old = dev_new
+            break
+        dev_old = dev_new
+
+    # summary.glm's Gamma dispersion: sum(((y-mu)/mu)^2) / (n - p)
+    pearson2 = np.sum(((y - mu) / mu) ** 2)
+    dispersion = pearson2 / (n - p) if n > p else np.nan
+    return {
+        "params": beta,
+        "mu": mu,
+        "weights": 1.0 / (mu * mu),
+        "deviance": dev_old,
+        "dispersion": dispersion,
+        "converged": converged,
+        "X": X,
+        "y": y,
+        "rank": p,
+    }
+
+
+def _cooks_distance_glm(fit: dict) -> np.ndarray:
+    """Cook's distance for a Gamma/identity GLM, matching R's ``cooks.distance``.
+
+    Formula: ``CD_i = (pearson_i / (1 - h_i))^2 * h_i / (dispersion * p)``
+    where ``pearson_i = (y_i - mu_i) / mu_i`` for Gamma and ``h`` are the
+    hat-matrix diagonals of the IRLS weighted design.
+    """
+    X = fit["X"]
+    y = fit["y"]
+    mu = fit["mu"]
+    w = fit["weights"]
+    p = fit["rank"]
+    dispersion = fit["dispersion"]
+    sw = np.sqrt(w)
+    Xw = X * sw[:, None]
+    # Hat matrix diagonal via QR of the weighted design.
+    Q, _ = np.linalg.qr(Xw, mode="reduced")
+    h = np.sum(Q * Q, axis=1)
+    pearson = (y - mu) / mu
+    with np.errstate(divide="ignore", invalid="ignore"):
+        cd = (pearson / (1.0 - h)) ** 2 * h / (dispersion * p)
+    cd[~np.isfinite(cd)] = np.nan
+    return cd
+
+
 def _parametric_dispersion_fit(
     disp_table: pd.DataFrame,
     initial_coefs: tuple[float, float] = (1e-6, 1.0),
     max_iter: int = 10,
-) -> tuple[sm.regression.linear_model.RegressionResultsWrapper, np.ndarray]:
-    """Port of ``parametricDispersionFit`` using statsmodels Gamma(identity) GLM.
+) -> tuple[dict, np.ndarray, np.ndarray]:
+    """Port of ``parametricDispersionFit`` using a hand-rolled R-faithful GLM.
 
-    Returns the fitted statsmodels result and the final coefficient vector
-    ``[asymptDisp, extraPois]``.
+    statsmodels' IRLS uses a parameter-based convergence test and a final
+    pinv refit that disagree with R's deviance-based convergence by
+    ~1e-5 on ``(asymptDisp, extraPois)``.  Porting R's ``glm.fit`` directly
+    matches R to machine precision, which cascades into VST and every
+    downstream ``disp_func`` evaluation.
+
+    Returns
+    -------
+    fit : dict
+        Output of ``_glm_fit_gamma_identity`` on the final inner iteration,
+        carrying everything ``_cooks_distance_glm`` needs.
+    coefs : numpy.ndarray
+        Final ``[asymptDisp, extraPois]``.
+    keep_mask : numpy.ndarray of bool
+        Boolean mask over ``disp_table`` rows actually used in the final fit
+        (matches R's behaviour of retaining only rows that survive the
+        residual cutoff on the last outer iteration).
     """
     coefs = np.array(initial_coefs, dtype=float)
     iter_count = 0
     tbl = disp_table.dropna(subset=["mu", "disp"]).copy()
     fit = None
+    keep_idx = None
 
     while True:
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -220,16 +339,16 @@ def _parametric_dispersion_fit(
             )
         keep = (residuals > initial_coefs[0]) & (residuals < 10_000)
         good = tbl.loc[keep]
+        keep_idx = np.flatnonzero(keep.to_numpy()) if hasattr(keep, "to_numpy") else np.flatnonzero(keep)
 
         X = np.column_stack([
             np.ones(len(good)), 1.0 / good["mu"].to_numpy()
         ])
         y = good["disp"].to_numpy()
-        model = sm.GLM(y, X, family=sm.families.Gamma(sm.families.links.Identity()))
-        fit = model.fit(start_params=coefs)
+        fit = _glm_fit_gamma_identity(X, y, start=coefs)
 
         old = coefs
-        coefs = np.array(fit.params, dtype=float)
+        coefs = fit["params"].astype(float).copy()
         if coefs[0] < initial_coefs[0]:
             coefs[0] = initial_coefs[0]
         if coefs[1] < 0:
@@ -245,7 +364,7 @@ def _parametric_dispersion_fit(
 
     if not np.all(coefs > 0):
         raise RuntimeError("Parametric dispersion fit failed: non-positive coefs.")
-    return fit, coefs
+    return fit, coefs, keep_idx
 
 
 def estimate_dispersions(
@@ -253,6 +372,7 @@ def estimate_dispersions(
     min_cells_detected: int = 1,
     remove_outliers: bool = True,
     model_name: str = "blind",
+    model_formula_str: str = "~1",
 ) -> AnnData:
     """Fit a negative-binomial dispersion curve and store it on the AnnData.
 
@@ -267,6 +387,14 @@ def estimate_dispersions(
         ``4 / nrow(disp_table)``.
     model_name : str, default ``"blind"``
         Name of the fit registered under ``adata.uns['monocle2']['disp_fit_info']``.
+    model_formula_str : str, default ``"~1"``
+        Covariate formula. When it references ``adata.obs`` columns
+        (e.g. ``"~CellType"``), cells are partitioned by the unique
+        covariate combinations, ``_disp_calc_helper_nb`` is run on each
+        partition, and the per-group ``(gene_id, mu, disp)`` rows are
+        concatenated before the single global parametric fit. Mirrors
+        R's ``estimateDispersionsForCellDataSet``
+        (``expr_models.R:515-522``).
 
     Returns
     -------
@@ -283,18 +411,55 @@ def estimate_dispersions(
             "NaNs in Size_Factor column. Call estimate_size_factors first."
         )
 
-    disp_df = _disp_calc_helper_nb(adata, min_cells_detected=min_cells_detected)
+    from ._internal._formula import formula_terms
+
+    covariates = [t for t in formula_terms(model_formula_str) if t != "1"]
+    if covariates:
+        missing = [c for c in covariates if c not in adata.obs.columns]
+        if missing:
+            raise ValueError(
+                f"Formula terms {missing!r} not present in adata.obs"
+            )
+        # R's ``group_by_`` with ``.dots = model_terms``: partition cells
+        # by unique combinations of the covariate columns, run
+        # ``disp_calc_helper_NB`` on each cell subset, and rbind the
+        # per-group (gene_id, mu, disp) rows into a pooled table. The
+        # later ``parametricDispersionFit`` then sees multiple rows per
+        # gene — one per covariate level at which the gene was detected.
+        group_keys = adata.obs[covariates]
+        tables: list[pd.DataFrame] = []
+        for _, idx in group_keys.groupby(
+            list(covariates), observed=True, sort=True,
+        ).groups.items():
+            positions = adata.obs_names.get_indexer(idx)
+            sub = adata[positions].copy()
+            tables.append(
+                _disp_calc_helper_nb(sub, min_cells_detected=min_cells_detected)
+            )
+        disp_df = pd.concat(tables, axis=0, ignore_index=True)
+    else:
+        disp_df = _disp_calc_helper_nb(
+            adata, min_cells_detected=min_cells_detected
+        )
+
     disp_df = disp_df.dropna(subset=["mu"]).reset_index(drop=True)
 
-    fit, coefs = _parametric_dispersion_fit(disp_df)
+    fit, coefs, fit_rows = _parametric_dispersion_fit(disp_df)
 
     if remove_outliers:
-        cook = fit.get_influence().cooks_distance[0]
+        cook = _cooks_distance_glm(fit)
         cutoff = 4.0 / len(disp_df)
-        keep = cook <= cutoff
-        print(f"Removing {int((~keep).sum())} outliers")
-        refit_df = disp_df.iloc[keep].reset_index(drop=True)
-        fit, coefs = _parametric_dispersion_fit(refit_df)
+        # R's estimateDispersions treats any gene outside the fit (filtered
+        # by the residual cutoff) as an outlier too, matching the
+        # ``setdiff(row.names(disp_table), names(CD))`` branch.
+        keep_mask = np.ones(len(disp_df), dtype=bool)
+        keep_mask[fit_rows[cook > cutoff]] = False
+        in_fit = np.zeros(len(disp_df), dtype=bool)
+        in_fit[fit_rows] = True
+        keep_mask &= in_fit
+        print(f"Removing {int((~keep_mask).sum())} outliers")
+        refit_df = disp_df.iloc[keep_mask].reset_index(drop=True)
+        fit, coefs, _ = _parametric_dispersion_fit(refit_df)
 
     asymp, extra = float(coefs[0]), float(coefs[1])
 

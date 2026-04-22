@@ -1,0 +1,3 @@
+asymptDisp=0.4108393207
+extraPois=0.1068618996
+rows=150

@@ -80,12 +80,17 @@ def _correlation_distance(matrix: np.ndarray) -> np.ndarray:
 
 
 def _row_center_scale(matrix: np.ndarray) -> np.ndarray:
-    mean = matrix.mean(axis=1, keepdims=True)
-    std = matrix.std(axis=1, ddof=1, keepdims=True)
-    centered = matrix - mean
-    out = np.divide(
-        centered, std, out=np.zeros_like(centered), where=std > 0,
-    )
+    # R ``scale()`` on a matrix with NaN rows silently emits NaN; numpy
+    # emits ``RuntimeWarning: invalid value encountered in subtract``
+    # whenever ``arr - arrmean`` touches a NaN. Silencing here matches
+    # R's silent behaviour; downstream code already maps NaN → 0.
+    with np.errstate(all="ignore"):
+        mean = matrix.mean(axis=1, keepdims=True)
+        std = matrix.std(axis=1, ddof=1, keepdims=True)
+        centered = matrix - mean
+        out = np.divide(
+            centered, std, out=np.zeros_like(centered), where=std > 0,
+        )
     return out
 
 
@@ -105,7 +110,11 @@ def _clip_and_filter(
     m: pd.DataFrame, scale_min: float, scale_max: float,
 ) -> pd.DataFrame:
     arr = m.to_numpy(dtype=float)
-    nonzero_sd = arr.std(axis=1, ddof=1) > 0
+    # ``arr.std`` on rows containing NaN is NaN (which then fails ``>0``
+    # and filters the row). Silence the incidental RuntimeWarning; R's
+    # ``apply(x, 1, sd)`` is silent here too.
+    with np.errstate(all="ignore"):
+        nonzero_sd = arr.std(axis=1, ddof=1) > 0
     arr = arr[nonzero_sd]
     index = m.index[nonzero_sd]
     arr = _row_center_scale(arr)
@@ -346,7 +355,8 @@ def plot_genes_branched_heatmap(
     heatmap_df.columns = [str(i + 1) for i in range(heatmap_df.shape[1])]
 
     arr = heatmap_df.to_numpy(dtype=float)
-    nonzero_sd = arr.std(axis=1, ddof=1) > 0
+    with np.errstate(all="ignore"):
+        nonzero_sd = arr.std(axis=1, ddof=1) > 0
     arr = arr[nonzero_sd]
     index = heatmap_df.index[nonzero_sd]
     arr = _row_center_scale(arr)
@@ -401,7 +411,10 @@ def plot_genes_branched_heatmap(
                 categories=["Pre-branch", branch_labels[0], branch_labels[1]],
             )
         },
-        index=[str(i + 1) for i in range(2 * (branch_a_num + branch_p_num))],
+        index=[
+            str(i + 1)
+            for i in range(branch_a_num + 2 * branch_p_num + branch_b_num)
+        ],
     )
 
     annotation_colors = {

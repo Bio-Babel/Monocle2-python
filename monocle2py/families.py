@@ -9,6 +9,7 @@ Downstream algorithms branch on the ``vfamily`` identifier.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 __all__ = [
@@ -40,15 +41,26 @@ class ExpressionFamily:
 
 @dataclass(frozen=True)
 class NegbinomialSize(ExpressionFamily):
-    """Negative-binomial with fixed ``mu / k`` relationship (VGAM ``negbinomial.size``)."""
+    """Negative-binomial with fixed ``size`` parameter (VGAM ``negbinomial.size``).
 
-    size: float = 1.0
+    ``size`` is VGAM's parameter ``k`` in ``Var(Y) = mu + mu^2 / k``.
+    Default ``float('inf')`` matches R ``VGAM::negbinomial.size()`` which
+    degenerates to a Poisson model. When Monocle's ``fit_model_helper``
+    has a valid ``disp_func`` it rebuilds the family with
+    ``size = 1 / disp_func(mean(x))``.
+    """
+
+    size: float = math.inf
     vfamily: str = "negbinomial.size"
 
 
 @dataclass(frozen=True)
 class Negbinomial(ExpressionFamily):
-    """Standard negative binomial family (VGAM ``negbinomial``)."""
+    """Standard negative binomial family (VGAM ``negbinomial``).
+
+    Unlike ``NegbinomialSize``, the size (dispersion) parameter is
+    **jointly estimated** alongside the mean parameters.
+    """
 
     vfamily: str = "negbinomial"
 
@@ -57,12 +69,14 @@ class Negbinomial(ExpressionFamily):
 class Tobit(ExpressionFamily):
     """Tobit censored-regression family (VGAM ``tobit``).
 
-    ``Lower`` matches VGAM's lower-censoring threshold. In Monocle2 this is
-    used for log-scaled FPKM/TPM matrices before ``relative2abs`` converts
-    them to transcript counts.
+    Mirrors ``VGAM::tobit(Lower, Upper, lmu="identitylink", lsd="loglink")``.
+    In monocle2 the response fed to the GLM is ``log10(x)``
+    (``expr_models.R:45-47``), so ``lower`` / ``upper`` are thresholds on the
+    log10 scale. Defaults match R's ``tobit()`` (Lower=0, Upper=+Inf).
     """
 
-    lower: float = 0.1
+    lower: float = 0.0
+    upper: float = math.inf
     vfamily: str = "Tobit"
 
 
@@ -73,8 +87,14 @@ class GaussianFamily(ExpressionFamily):
     vfamily: str = "gaussianff"
 
 
-def negbinomial_size(size: float = 1.0) -> NegbinomialSize:
-    """Build a :class:`NegbinomialSize` family (mirrors ``VGAM::negbinomial.size``)."""
+def negbinomial_size(size: float = math.inf) -> NegbinomialSize:
+    """Build a :class:`NegbinomialSize` family (mirrors ``VGAM::negbinomial.size``).
+
+    Default ``size=Inf`` matches R's ``VGAM::negbinomial.size()`` (Poisson
+    degeneracy). Pass an explicit finite ``size`` to get a fixed-dispersion
+    NB; Monocle's differential test overrides this with
+    ``size = 1/disp_func(mean)`` when a dispersion function is available.
+    """
     return NegbinomialSize(size=float(size))
 
 
@@ -83,9 +103,13 @@ def negbinomial() -> Negbinomial:
     return Negbinomial()
 
 
-def tobit(lower: float = 0.1) -> Tobit:
-    """Build a :class:`Tobit` family (mirrors ``VGAM::tobit``)."""
-    return Tobit(lower=float(lower))
+def tobit(lower: float = 0.0, upper: float = math.inf) -> Tobit:
+    """Build a :class:`Tobit` family (mirrors ``VGAM::tobit(Lower, Upper)``).
+
+    Both thresholds are on the log10 response scale that monocle2 feeds to
+    the GLM. R defaults: ``Lower=0``, ``Upper=+Inf``.
+    """
+    return Tobit(lower=float(lower), upper=float(upper))
 
 
 def gaussian_family() -> GaussianFamily:

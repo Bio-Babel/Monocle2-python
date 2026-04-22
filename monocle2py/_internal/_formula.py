@@ -2,10 +2,11 @@
 
 R's ``differentialGeneTest`` and ``fitModel`` accept formula strings such as
 ``"~sm.ns(Pseudotime, df=3)"``. ``sm.ns`` is VGAM's re-export of
-``splines::ns`` (natural cubic spline). The patsy port translates the term to
-``bs(x, df=N)`` (B-spline), which is patsy's closest natively-available
-analog. The basis matrices differ but span the same function space, so LRT
-statistics agree to within a small numerical margin.
+``splines::ns`` (natural cubic spline with linearity beyond Boundary knots).
+We rewrite ``sm.ns(...)``/``splines::ns(...)``/``ns(...)`` to our own
+``ns(...)`` patsy stateful transform (:mod:`_nspline`), which reproduces R's
+basis to machine precision (1e-15) and memorises Boundary + interior knots
+on the training pass so predictions on a new grid re-use the training basis.
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ from typing import Iterable
 import numpy as np
 import pandas as pd
 from patsy import dmatrix
+
+from ._nspline import ns  # noqa: F401 — exposed to patsy's eval_env
 
 __all__ = [
     "DEFAULT_FULL_FORMULA",
@@ -29,16 +32,16 @@ DEFAULT_FULL_FORMULA = "~sm.ns(Pseudotime, df=3)"
 DEFAULT_REDUCED_FORMULA = "~1"
 
 _NS_PATTERNS: tuple[tuple[str, str], ...] = (
-    (r"\bsm\.ns\(", "bs("),
-    (r"\bsplines::ns\(", "bs("),
-    (r"\bVGAM::sm\.ns\(", "bs("),
-    (r"\bns\(", "bs("),
+    (r"\bsm\.ns\(", "ns("),
+    (r"\bsplines::ns\(", "ns("),
+    (r"\bVGAM::sm\.ns\(", "ns("),
 )
 _NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _FUNC_NAMES = {
-    "bs", "cr", "cc", "te", "I", "C", "log", "log10", "log2", "exp",
-    "sqrt", "sin", "cos", "scale", "center", "df", "degree",
+    "ns", "bs", "cr", "cc", "te", "I", "C", "log", "log10", "log2", "exp",
+    "sqrt", "sin", "cos", "scale", "center", "df", "degree", "intercept",
     "include_intercept", "knots", "lower_bound", "upper_bound",
+    "Boundary_knots",
 }
 
 

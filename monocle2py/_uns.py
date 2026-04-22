@@ -61,20 +61,64 @@ def get_state(adata: AnnData) -> dict[str, Any]:
     return state
 
 
+def _rebuild_family(name: str, params: dict[str, Any] | None) -> Any:
+    """Rebuild a family dataclass from a ``vfamily`` string + numeric params.
+
+    Used both for in-memory reads (so we never hold a stale dataclass
+    reference) and for h5ad round-trips where anndata cannot serialise
+    arbitrary Python objects inside ``uns``.
+    """
+    from .families import family_from_name, negbinomial_size, tobit
+    if not params:
+        return family_from_name(name)
+    kwargs = {k: float(v) for k, v in dict(params).items()}
+    if name == "negbinomial.size":
+        return negbinomial_size(**kwargs)
+    if name in ("Tobit", "tobit"):
+        return tobit(**kwargs)
+    return family_from_name(name)
+
+
 def get_expression_family(adata: AnnData) -> Any:
-    """Return the family object stored on the AnnData."""
+    """Return the family object stored on the AnnData.
+
+    Reads ``expression_family`` (the ``vfamily`` string) and
+    ``expression_family_params`` (a dict of numeric parameters) and
+    calls the matching factory. Storing the dataclass itself under
+    ``uns`` breaks ``write_h5ad`` (anndata has no serialiser for custom
+    Python objects), so the string+params pair is the canonical
+    representation that survives round-trips.
+    """
     state = get_state(adata)
-    if "expression_family_obj" in state:
-        return state["expression_family_obj"]
-    from .families import family_from_name
-    return family_from_name(state["expression_family"])
+    name = state["expression_family"]
+    params = state.get("expression_family_params")
+    return _rebuild_family(name, dict(params) if params is not None else None)
+
+
+def _serialisable_family_params(family: Any) -> dict[str, Any]:
+    """Pull numeric parameters off a family dataclass for h5ad storage."""
+    params: dict[str, Any] = {}
+    for attr in ("size", "lower", "upper"):
+        val = getattr(family, attr, None)
+        if val is not None:
+            params[attr] = float(val)
+    return params
 
 
 def set_expression_family(adata: AnnData, family: Any) -> None:
-    """Record the expression family on the AnnData state."""
+    """Record the expression family on the AnnData state.
+
+    Stores the ``vfamily`` string and any numeric parameters so
+    :func:`get_expression_family` can rebuild the family faithfully
+    after an ``AnnData.write_h5ad`` / ``read_h5ad`` cycle.
+    """
     state = ensure_state(adata)
     state["expression_family"] = family.vfamily
-    state["expression_family_obj"] = family
+    params = _serialisable_family_params(family)
+    if params:
+        state["expression_family_params"] = params
+    else:
+        state.pop("expression_family_params", None)
 
 
 def get_lower_detection_limit(adata: AnnData) -> float:

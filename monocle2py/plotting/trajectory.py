@@ -135,7 +135,7 @@ def plot_cell_trajectory(
         raise ValueError("DDRTree centroids have fewer dims than requested x/y.")
     centroid_xy = Kt[:, [x - 1, y - 1]] @ rot.T
 
-    obs = adata.obs.copy()
+    obs = adata.obs.reset_index(drop=True)
     cell_df = pd.DataFrame({
         "data_dim_1": cell_xy[:, 0],
         "data_dim_2": cell_xy[:, 1],
@@ -145,7 +145,7 @@ def plot_cell_trajectory(
     })
     for col in obs.columns:
         if col not in cell_df.columns:
-            cell_df[col] = obs[col].to_numpy()
+            cell_df[col] = obs[col]
 
     edge_rows = []
     for u, v in edges:
@@ -247,79 +247,104 @@ def plot_cell_trajectory(
 
 
 def _layout_as_tree(
-    adj: Sequence[Sequence[tuple[int, float]]], root: int,
+    adj: Sequence[Sequence[tuple[int, float]]], roots: Sequence[int],
 ) -> np.ndarray:
-    """Iterative Reingold–Tilford-style layout: x = leaf order, y = -depth."""
+    """Reingold–Tilford tree layout matching R's ``igraph::layout_as_tree``.
+
+    Delegates to ``igraph.Graph.layout_reingold_tilford`` (the same C
+    implementation R's ``layout_as_tree`` wraps). ``roots`` may contain one
+    or more vertex IDs; multi-root calls produce the forest-style layout R
+    emits when ``plot_complex_cell_trajectory`` finds several leaf centroids
+    reachable from the chosen states (``plotting.R:2266`` passes a vector).
+
+    Returns an ``(n, 2)`` array. Column 0 is x, column 1 is y with the root
+    at the highest y value — the orientation R uses (igraph-python's native
+    layout puts the root at y=0; we flip to match).
+    """
+    import igraph as ig
+
     n = len(adj)
-    parent = np.full(n, -1, dtype=int)
-    depth = np.zeros(n, dtype=int)
-    visited = np.zeros(n, dtype=bool)
-    visited[root] = True
-    queue = [root]
-    while queue:
-        u = queue.pop(0)
-        for v, _ in adj[u]:
-            if not visited[v]:
-                visited[v] = True
-                parent[v] = u
-                depth[v] = depth[u] + 1
-                queue.append(v)
-
-    children: list[list[int]] = [[] for _ in range(n)]
-    for v in range(n):
-        if parent[v] >= 0:
-            children[parent[v]].append(v)
-
-    pos = np.zeros(n, dtype=float)
-    counter = [0.0]
-    stack: list[tuple[int, int]] = [(root, 0)]
-    while stack:
-        node, state = stack.pop()
-        if state == 0:
-            if not children[node]:
-                pos[node] = counter[0]
-                counter[0] += 1.0
-            else:
-                stack.append((node, 1))
-                for child in reversed(children[node]):
-                    stack.append((child, 0))
-        else:
-            child_positions = [pos[c] for c in children[node]]
-            pos[node] = (child_positions[0] + child_positions[-1]) / 2.0
-
-    coords = np.zeros((n, 2), dtype=float)
-    coords[:, 0] = pos
-    coords[:, 1] = -depth.astype(float)
+    edges: list[tuple[int, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for u, neighbours in enumerate(adj):
+        for v, _ in neighbours:
+            key = (u, v) if u <= v else (v, u)
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append(key)
+    g = ig.Graph(n=n, edges=edges, directed=False)
+    root_list = [int(r) for r in roots] if roots else [0]
+    layout = g.layout_reingold_tilford(root=root_list)
+    coords = np.asarray(layout.coords, dtype=float)
+    coords[:, 1] = coords[:, 1].max() - coords[:, 1]
     return coords
 
 
-def _select_root_vertex_for_complex(
+def _select_roots_for_complex(
     adata: AnnData,
     adj: Sequence[Sequence[tuple[int, float]]],
     closest_vertex: np.ndarray,
     root_states: Iterable[int] | None,
-) -> int:
+) -> list[int]:
+    """Pick layout root centroids by R's ``plot_complex_cell_trajectory`` rules.
+
+    Port of ``plotting.R:2249-2269`` — the selection in R preserves pData
+    (= original cell) order and does *not* uniqueify by centroid index, so
+    the first-in-pData leaf wins the root slot. Three branches mirror R:
+
+    1. ``root_states is None`` with ``Pseudotime``: roots are the closest
+       centroids of every cell with ``Pseudotime==0``, in cell order. No
+       leaf filter (R line 2254-2257).
+    2. ``root_states is None`` without ``Pseudotime``: R line 2251 filters
+       degree-1 centroids on the full tree; take the first.
+    3. ``root_states`` given: take cells in those states (pData order),
+       map to their closest centroids keeping duplicates, filter positions
+       whose centroid is degree-1, and keep those centroids in that order
+       (R line 2265-2266). If none are leaves, fall back to the first
+       centroid in the sequence.
+
+    R feeds the resulting centroid-name vector straight into
+    ``layout_as_tree(..., root=root_cell)``. igraph both in R and Python
+    deduplicates repeated root IDs internally — we dedupe here anyway so
+    the returned list is canonical.
+    """
     deg = np.array([len(a) for a in adj], dtype=int)
+
+    def _dedupe(seq: Iterable[int]) -> list[int]:
+        seen: set[int] = set()
+        out: list[int] = []
+        for v in seq:
+            vi = int(v)
+            if vi not in seen:
+                seen.add(vi)
+                out.append(vi)
+        return out
+
     if root_states is None:
         if "Pseudotime" in adata.obs.columns:
             pt = adata.obs["Pseudotime"].to_numpy(dtype=float)
-            root_cells = np.flatnonzero(pt == 0.0)
-        else:
-            root_cells = np.array([0], dtype=int)
-        candidate_centroids = np.unique(closest_vertex[root_cells]) \
-            if root_cells.size else np.unique(closest_vertex)
-    else:
-        if "State" not in adata.obs.columns:
-            raise RuntimeError("State column missing — call order_cells first.")
-        s = adata.obs["State"].astype(int).to_numpy()
-        root_states = list(map(int, root_states))
-        cell_mask = np.isin(s, root_states)
-        candidate_centroids = np.unique(closest_vertex[cell_mask])
+            root_cell_positions = np.flatnonzero(pt == 0.0)
+            if root_cell_positions.size == 0:
+                root_cell_positions = np.array([0], dtype=int)
+            return _dedupe(closest_vertex[root_cell_positions].tolist())
+        leaves = np.flatnonzero(deg == 1)
+        if leaves.size:
+            return [int(leaves[0])]
+        return [0]
 
-    leaves = candidate_centroids[deg[candidate_centroids] == 1]
-    if leaves.size:
-        return int(leaves[0])
-    return int(candidate_centroids[0])
+    if "State" not in adata.obs.columns:
+        raise RuntimeError("State column missing — call order_cells first.")
+    s = adata.obs["State"].astype(int).to_numpy()
+    root_states_int = list(map(int, root_states))
+    cell_mask = np.isin(s, root_states_int)
+    if not cell_mask.any():
+        raise RuntimeError(f"No cells in State(s) {root_states_int}")
+    cells_in_order = closest_vertex[cell_mask]
+    leaf_positions = np.flatnonzero(deg[cells_in_order] == 1)
+    if leaf_positions.size:
+        return _dedupe(int(cells_in_order[p]) for p in leaf_positions)
+    return [int(cells_in_order[0])]
 
 
 def plot_complex_cell_trajectory(
@@ -352,13 +377,13 @@ def plot_complex_cell_trajectory(
     n_centroids = K.shape[1]
     adj = _centroid_adj(edges, weights, n_centroids)
 
-    root_vertex = _select_root_vertex_for_complex(
+    root_vertices = _select_roots_for_complex(
         adata, adj, closest_vertex, root_states,
     )
-    coords = _layout_as_tree(adj, root_vertex)  # n_centroids x 2
+    coords = _layout_as_tree(adj, root_vertices)  # n_centroids x 2
 
     cell_xy = coords[closest_vertex]
-    obs = adata.obs.copy()
+    obs = adata.obs.reset_index(drop=True)
     cell_df = pd.DataFrame({
         "data_dim_1": cell_xy[:, 0],
         "data_dim_2": cell_xy[:, 1],
@@ -366,7 +391,7 @@ def plot_complex_cell_trajectory(
     })
     for col in obs.columns:
         if col not in cell_df.columns:
-            cell_df[col] = obs[col].to_numpy()
+            cell_df[col] = obs[col]
 
     edge_rows = []
     for u, v in edges:
@@ -406,27 +431,52 @@ def plot_complex_cell_trajectory(
             color=backbone_color,
         )
 
+    # Mirror R's ``class(data_df[, color_by]) == 'numeric'`` check
+    # (``plotting.R:2347,2354``). In R, ``class()`` is "numeric" only for
+    # doubles — integers return "integer", factors return "factor" — so
+    # integer-valued columns (cluster, State, etc.) go to the discrete
+    # path. Use ``is_float_dtype`` instead of ``is_numeric_dtype`` so we
+    # don't accidentally treat ``int64`` columns as continuous.
     use_numeric_color = (
         color_by in cell_df.columns
-        and pd.api.types.is_numeric_dtype(cell_df[color_by])
+        and pd.api.types.is_float_dtype(cell_df[color_by])
     )
+    # R ``plotting.R:2348/2351/2355/2358`` passes only ``height=5`` to
+    # ``geom_jitter``. Omitting ``width`` lets ggplot2's ``position_jitter``
+    # use its default ``resolution(x) * 0.4`` (``position.py:745-746`` here),
+    # which gives the horizontal stripplot spread R produces. Passing
+    # ``width=0`` forces a single stacked column — the bug we saw.
     if use_numeric_color:
         cell_df["__log_color"] = np.log10(
             cell_df[color_by].to_numpy(float) + 0.1
         )
         g = g + geom_jitter(
             aes(color="__log_color"), data=cell_df,
-            size=cell_size, height=5, width=0,
+            size=cell_size, height=5,
         ) + scale_color_viridis_c(name=f"log10({color_by} + 0.1)")
     else:
         g = g + geom_jitter(
             aes(color=color_by), data=cell_df,
-            size=cell_size, height=5, width=0,
+            size=cell_size, height=5,
         )
 
     if show_branch_points:
-        deg = np.array([len(a) for a in adj], dtype=int)
-        branch_centroids = np.flatnonzero(deg > 2)
+        # R ``plotting.R:2363-2366`` reads the branch-point list straight
+        # from ``auxOrderingData$DDRTree$branch_points`` (assigned once by
+        # ``order_cells``), then labels each point by its position in that
+        # list. Use the stored list so the numbering survives any future
+        # post-order-cells mutation of the adjacency.
+        state = get_state(adata)
+        aux_bp = (
+            state.get("aux_ordering", {})
+            .get("DDRTree", {})
+            .get("branch_points")
+        )
+        if aux_bp is None:
+            deg_v = np.array([len(a) for a in adj], dtype=int)
+            branch_centroids = np.flatnonzero(deg_v > 2).astype(np.int64)
+        else:
+            branch_centroids = np.asarray(aux_bp, dtype=np.int64)
         if branch_centroids.size:
             bp_df = pd.DataFrame({
                 "x": coords[branch_centroids, 0],

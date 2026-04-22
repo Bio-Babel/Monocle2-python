@@ -70,4 +70,8 @@ def test_passthrough_anndata_populates_state() -> None:
     adata_in = AnnData(X=X, obs=obs, var=var)
     adata = new_cell_dataset(adata_in, expression_family=negbinomial_size(size=2.0))
     assert adata is adata_in
-    assert adata.uns["monocle2"]["expression_family_obj"].size == pytest.approx(2.0)
+    # Family is persisted as (vfamily, params) so AnnData.write_h5ad does
+    # not choke on a non-serialisable dataclass instance.
+    state = adata.uns["monocle2"]
+    assert state["expression_family"] == "negbinomial.size"
+    assert float(state["expression_family_params"]["size"]) == pytest.approx(2.0)

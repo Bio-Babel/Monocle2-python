@@ -97,3 +97,85 @@ def test_tobit_log_normalisation() -> None:
     reduce_dimension(cds, reduction_method="tSNE", num_dim=5,
                      perplexity=5, auto_param_selection=False)
     assert cds.obsm["X_dr"].shape == (n_cells, 2)
+
+
+def test_remove_batch_effects_matches_limma_lmFit_gold() -> None:
+    """Port of R ``reduceDimension(residualModelFormulaStr=...)`` batch
+    removal (``order_cells.R:1363-1375``). ``_remove_batch_effects``
+    must match ``limma::lmFit(FM, X.model_mat)`` per-gene OLS followed
+    by ``FM - beta[, -1] %*% t(X[, -1])`` to machine precision."""
+    from pathlib import Path
+    from anndata import AnnData
+    from monocle2py.dim_reduction import _remove_batch_effects
+
+    fix_dir = Path(__file__).parent / "_fixtures"
+    if not (fix_dir / "residual_fm.csv").exists():
+        pytest.skip("R gold fixture not generated yet")
+    FM = pd.read_csv(fix_dir / "residual_fm.csv", index_col=0).to_numpy()
+    pheno = pd.read_csv(fix_dir / "residual_pdata.csv", index_col=0)
+    FM_adj_R = pd.read_csv(fix_dir / "residual_fm_adj.csv", index_col=0).to_numpy()
+    adata = AnnData(X=np.zeros((FM.shape[1], FM.shape[0])), obs=pheno)
+    FM_adj_py = _remove_batch_effects(FM, adata, "~batch")
+    # Machine-precision agreement per-entry (R reports 1.15e-14 on this fixture).
+    np.testing.assert_allclose(FM_adj_py, FM_adj_R, rtol=0, atol=1e-10)
+
+
+def test_tsne_pca_preproc_matches_prcomp_irlba_gold() -> None:
+    """Port of R ``prcomp_irlba(t(FM), center=TRUE, scale.=TRUE)``
+    (``order_cells.R:1430-1432``). Singular values must match exactly;
+    PC scores agree up to a per-column sign flip because SVD's left
+    singular vectors are defined only up to sign."""
+    from pathlib import Path
+    from sklearn.decomposition import PCA
+
+    fix_dir = Path(__file__).parent / "_fixtures"
+    if not (fix_dir / "prcomp_fm.csv").exists():
+        pytest.skip("R gold fixture not generated yet")
+    FM = pd.read_csv(fix_dir / "prcomp_fm.csv", index_col=0).to_numpy()
+    scores_R = pd.read_csv(fix_dir / "prcomp_scores.csv").to_numpy()
+    sdev_R = pd.read_csv(fix_dir / "prcomp_sdev.csv")["sdev"].to_numpy()
+
+    FM_t = FM.T.astype(np.float64)
+    mu = FM_t.mean(axis=0)
+    sd = FM_t.std(axis=0, ddof=1)
+    keep = sd > 0
+    FM_scaled = (FM_t[:, keep] - mu[keep]) / sd[keep]
+    pca = PCA(n_components=10, random_state=2016)
+    scores_py = pca.fit_transform(FM_scaled)
+    sdev_py = pca.singular_values_ / np.sqrt(FM_scaled.shape[0] - 1)
+
+    np.testing.assert_allclose(sdev_py, sdev_R, rtol=0, atol=1e-8)
+    for col in range(scores_R.shape[1]):
+        corr = np.corrcoef(scores_py[:, col], scores_R[:, col])[0, 1]
+        assert abs(corr) > 1 - 1e-8, f"PC{col} correlation |{corr}| < 1"
+
+
+def test_reduce_dimension_accepts_residual_model_formula_str() -> None:
+    """End-to-end smoke test for ``residual_model_formula_str``: with a
+    batch covariate, the tSNE embedding must differ from the no-batch
+    run, confirming the batch-removal step fires."""
+    from monocle2py import estimate_size_factors
+
+    rng = np.random.default_rng(0)
+    n_cells, n_genes = 40, 60
+    X = rng.negative_binomial(n=4, p=0.5, size=(n_cells, n_genes)).astype(float)
+    obs = pd.DataFrame({
+        "batch": np.repeat(["A", "B"], n_cells // 2),
+    }, index=[f"C{i}" for i in range(n_cells)])
+    var = pd.DataFrame({"gene_short_name": [f"G{i}" for i in range(n_genes)]},
+                       index=[f"G{i}" for i in range(n_genes)])
+    cds_no = new_cell_dataset(X, pheno_data=obs.copy(), feature_data=var.copy())
+    cds_yes = new_cell_dataset(X, pheno_data=obs.copy(), feature_data=var.copy())
+    estimate_size_factors(cds_no)
+    estimate_size_factors(cds_yes)
+    reduce_dimension(
+        cds_no, reduction_method="tSNE", num_dim=5,
+        perplexity=5, auto_param_selection=False,
+    )
+    reduce_dimension(
+        cds_yes, reduction_method="tSNE", num_dim=5,
+        perplexity=5, auto_param_selection=False,
+        residual_model_formula_str="~batch",
+    )
+    assert cds_yes.obsm["X_dr"].shape == (n_cells, 2)
+    assert not np.allclose(cds_no.obsm["X_dr"], cds_yes.obsm["X_dr"])
