@@ -209,11 +209,8 @@ def _reduce_tsne(
 
     The PCA step mirrors R's ``prcomp_irlba(t(FM), center=TRUE,
     scale.=TRUE)`` (``order_cells.R:1430-1432``) — per-gene z-score
-    (centre + ``sd`` with ddof=1) followed by a standard SVD, with PC
-    scores returned **unscaled** (``irlba_res$x`` is ``U @ diag(S)``,
-    not whitened). The earlier ``PCA(whiten=True)`` divided scores by
-    ``sqrt(eigenvalues)``, which is a different preprocessing pipeline
-    from R and affects the tSNE embedding downstream.
+    (centre + ``sd`` with ddof=1) followed by a standard SVD, returning
+    PC scores unscaled (``irlba_res$x`` is ``U @ diag(S)``, not whitened).
     """
     n_cells = FM.shape[1]
     FM_t = FM.T.astype(np.float64)  # cells x genes

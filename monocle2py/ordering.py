@@ -1,4 +1,4 @@
-"""Slice 5: ordering API (``set_ordering_filter`` + ``order_cells``).
+"""Ordering API (``set_ordering_filter`` + ``order_cells``).
 
 Ports the DDRTree branch of R's ``orderCells``. Cells are projected onto the
 principal graph learned by DDRTree, a cell-level MST is built on those

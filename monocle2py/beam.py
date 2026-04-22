@@ -1,4 +1,4 @@
-"""Slice 7: BEAM — branch-dependent expression analysis.
+"""BEAM — branch-dependent expression analysis.
 
 Ports ``BEAM``, ``branchTest``, ``buildBranchCellDataSet`` and ``calILRs``
 from ``monocle2/R/BEAM.R``. Requires :func:`~monocle2py.order_cells` to
@@ -8,10 +8,7 @@ MST** (Y-node level), and the ``closest_vertex`` mapping are available in
 
 R's ``buildBranchCellDataSet`` walks the principal graph at the Y-node
 (centroid) level — *not* the cell level — and maps each Y-node back to
-the cells whose ``closest_vertex`` sits on that node. This Python port
-mirrors that choice; an earlier implementation that built a fresh
-cell×cell MST produced incorrect branch identification and
-non-deterministic A/B labelling on multifurcations.
+the cells whose ``closest_vertex`` sits on that node.
 """
 
 from __future__ import annotations
@@ -493,8 +490,7 @@ def branch_test(
     """Test each gene for branch-dependent expression.
 
     Builds a branch-assigned AnnData via :func:`build_branch_cell_dataset`,
-    then compares the two formulas via a per-gene LRT using the Slice 6
-    machinery. If ``"Branch"`` is not referenced in the full formula, the
+    then compares the two formulas via a per-gene LRT. If ``"Branch"`` is not referenced in the full formula, the
     test runs directly on the input AnnData without duplication.
 
     ``progenitor_method`` and ``stretch`` mirror R's ``...`` forwarding

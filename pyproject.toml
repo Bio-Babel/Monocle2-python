@@ -3,11 +3,45 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "monocle2py"
-version = "0.1.0"
-description = "Python port of the R monocle2 package"
+name = "monocle2-python"
+version = "2.9.0"
+description = "Python port of the R monocle2 package (tracks cole-trapnell-lab/monocle-release 2.9.0 @ 7df1050) — single-cell trajectory, differential expression, BEAM."
+readme = "README.md"
 requires-python = ">=3.10"
 license = "Artistic-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Jeffery Liu", email = "jeffliu.lucky@gmail.com" },
+]
+keywords = [
+    "monocle2",
+    "monocle",
+    "single-cell",
+    "scRNA-seq",
+    "trajectory",
+    "pseudotime",
+    "BEAM",
+    "differential-expression",
+    "DDRTree",
+    "R-port",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
 dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
@@ -17,24 +51,48 @@ dependencies = [
     "statsmodels>=0.14",
     "patsy>=0.5",
     "python-igraph>=0.10",
-    "ddrtree",
-    "ggplot2_py",
-    "pheatmap_py",
-    "grid_py",
-    "gtable_py",
-    "scales_py",
-    "ggrepel_py",
+    "ddrtree-python>=0.1.6",
+    "ggplot2-python>=4.0.2.9000",
+    "pheatmap-python>=1.0.13",
+    "rgrid-python>=4.5.3",
+    "gtable-python>=0.3.6",
+    "scales-python>=1.4.0",
+    "ggrepel-python>=0.9.8",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-cov", "ruff"]
-docs = ["mkdocs", "mkdocstrings[python]", "mkdocs-material", "mkdocs-jupyter"]
+dev = ["pytest", "pytest-cov", "ruff", "build", "twine"]
+docs = [
+    "mkdocs",
+    "mkdocstrings[python]",
+    "mkdocs-material",
+    "mkdocs-jupyter",
+]
+
+[project.urls]
+Homepage            = "https://github.com/Bio-Babel/Monocle2-python"
+Repository          = "https://github.com/Bio-Babel/Monocle2-python"
+Issues              = "https://github.com/Bio-Babel/Monocle2-python/issues"
+Documentation       = "https://github.com/Bio-Babel/Monocle2-python#readme"
+"Upstream (R package)"    = "https://github.com/cole-trapnell-lab/monocle-release"
+"Tutorial data (Zenodo)"  = "https://zenodo.org/records/19699224"
 
 [tool.hatch.build.targets.wheel]
 packages = ["monocle2py"]
 
 [tool.hatch.build.targets.sdist]
-include = ["monocle2py", "tutorials", "tests", "validation", "docs", "README.md", "LICENSE"]
+exclude = [
+    "tutorials/",
+    "docs/",
+    "tests/",
+    "site/",
+    "validation/",
+    "mkdocs.yml",
+    ".github/",
+    "*.egg-info/",
+    "build/",
+    "dist/",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,4 +1,4 @@
-"""Per-gene differential expression tests (Slice 6).
+"""Per-gene differential expression tests.
 
 Ports of ``differentialGeneTest``, ``responseMatrix``, and ``genSmoothCurves``
 from ``monocle2/R/differential_expression.R`` and ``monocle2/R/expr_models.R``.

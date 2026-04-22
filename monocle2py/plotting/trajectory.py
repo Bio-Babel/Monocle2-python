@@ -442,10 +442,9 @@ def plot_complex_cell_trajectory(
         and pd.api.types.is_float_dtype(cell_df[color_by])
     )
     # R ``plotting.R:2348/2351/2355/2358`` passes only ``height=5`` to
-    # ``geom_jitter``. Omitting ``width`` lets ggplot2's ``position_jitter``
-    # use its default ``resolution(x) * 0.4`` (``position.py:745-746`` here),
-    # which gives the horizontal stripplot spread R produces. Passing
-    # ``width=0`` forces a single stacked column — the bug we saw.
+    # ``geom_jitter``; leave ``width`` unset so ``position_jitter``'s
+    # default ``resolution(x) * 0.4`` produces the horizontal stripplot
+    # spread R shows.
     if use_numeric_color:
         cell_df["__log_color"] = np.log10(
             cell_df[color_by].to_numpy(float) + 0.1

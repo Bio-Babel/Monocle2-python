@@ -1,8 +1,4 @@
-"""monocle2py — Python port of the R monocle2 package.
-
-Public exports are grown slice by slice. Slice 0 exposes the tutorial data
-loaders; subsequent slices add the analysis API.
-"""
+"""monocle2py — Python port of the R monocle2 package."""
 
 from .beam import beam, branch_test, build_branch_cell_dataset, cal_ilrs
 from .cell_dataset import new_cell_dataset
@@ -50,7 +46,8 @@ from .preprocess import (
     vst_exprs,
 )
 
-__version__ = "2.9.0+7df1050"
+__version__ = "2.9.0"
+__r_commit__ = "7df1050"
 
 __all__ = [
     "beam",
