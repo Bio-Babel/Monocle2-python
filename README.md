@@ -32,6 +32,23 @@ m2.order_cells(cds)
 m2.plot_cell_trajectory(cds, color_by="State")
 ```
 
+### DDRTree backend (CPU / GPU)
+
+If you want to use GPU, please install the torch build that fits your machine first.
+
+```python
+# CPU, reference path (default — matches R numerically)
+m2.reduce_dimension(cds, reduction_method="DDRTree")
+
+# GPU via PyTorch (Borůvka MST stays on-device)
+m2.reduce_dimension(cds, reduction_method="DDRTree",
+                    backend="torch", device="cuda")
+```
+
+GPU is never selected automatically — passing `backend="torch"` and
+`device="cuda"` is required. K-means initialisation still runs on CPU
+(small, constant overhead).
+
 ## Tutorials
 
 Four runnable notebooks that reproduce the R monocle2 tutorials live under [`tutorials/`](tutorials/):
