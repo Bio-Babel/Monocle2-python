@@ -18,10 +18,12 @@ __all__ = [
     "Negbinomial",
     "Tobit",
     "GaussianFamily",
+    "BinomialFamily",
     "negbinomial_size",
     "negbinomial",
     "tobit",
     "gaussian_family",
+    "binomialff",
     "family_from_name",
 ]
 
@@ -82,9 +84,41 @@ class Tobit(ExpressionFamily):
 
 @dataclass(frozen=True)
 class GaussianFamily(ExpressionFamily):
-    """Gaussian family for already-transformed expression (VGAM ``gaussianff``)."""
+    """Gaussian family for raw-response continuous data (VGAM ``uninormal``).
 
-    vfamily: str = "gaussianff"
+    Monocle2 R uses VGAM's ``uninormal`` family (univariate normal with
+    raw, non-log-transformed response) — see ``order_cells.R:1266-1271``
+    and ``expr_models.R:42-47``. Earlier versions of this port stored
+    ``vfamily = "gaussianff"`` (a different VGAM alias that Monocle2 R
+    never references), which caused two divergences from R:
+
+    * ``normalize_expr_data`` matched on the wrong string;
+    * ``make_response`` in ``_vgam.py`` log10-transformed the response
+      instead of feeding it raw to the GLM (R's ``uninormal`` rule).
+
+    The canonical ``vfamily`` is now ``"uninormal"``. The previous
+    ``"gaussianff"`` string is intentionally rejected by
+    :func:`family_from_name` with a one-line migration hint rather than
+    silently aliased — see :doc:`feedback-r-port-algorithm-not-signature`
+    for the meta-principle.
+    """
+
+    vfamily: str = "uninormal"
+
+
+@dataclass(frozen=True)
+class BinomialFamily(ExpressionFamily):
+    """Binomial family for binarized data (VGAM ``binomialff``).
+
+    Used by Monocle2 for binarized single-cell ATAC peak-presence data
+    or any other 0/1 response. The trajectory pipeline applies a
+    TF-IDF transform in ``normalize_expr_data`` (mirrors
+    ``order_cells.R:1248-1256``); per-gene differential tests fit a
+    logistic GLM via :func:`statsmodels.api.families.Binomial`
+    (``_vgam.py:make_family`` handles the dispatch).
+    """
+
+    vfamily: str = "binomialff"
 
 
 def negbinomial_size(size: float = math.inf) -> NegbinomialSize:
@@ -113,8 +147,13 @@ def tobit(lower: float = 0.0, upper: float = math.inf) -> Tobit:
 
 
 def gaussian_family() -> GaussianFamily:
-    """Build a :class:`GaussianFamily` family (mirrors ``VGAM::gaussianff``)."""
+    """Build a :class:`GaussianFamily` family (mirrors ``VGAM::uninormal``)."""
     return GaussianFamily()
+
+
+def binomialff() -> BinomialFamily:
+    """Build a :class:`BinomialFamily` (mirrors ``VGAM::binomialff``)."""
+    return BinomialFamily()
 
 
 _BY_NAME: dict[str, ExpressionFamily] = {
@@ -122,7 +161,8 @@ _BY_NAME: dict[str, ExpressionFamily] = {
     "negbinomial": Negbinomial(),
     "Tobit": Tobit(),
     "tobit": Tobit(),
-    "gaussianff": GaussianFamily(),
+    "uninormal": GaussianFamily(),
+    "binomialff": BinomialFamily(),
 }
 
 
@@ -140,4 +180,13 @@ def family_from_name(name: str) -> ExpressionFamily:
     """
     if name in _BY_NAME:
         return _BY_NAME[name]
+    if name == "gaussianff":
+        raise ValueError(
+            "Expression family 'gaussianff' was a pre-rename Python-side "
+            "mislabel of the VGAM 'uninormal' family — Monocle2 R always uses "
+            "'uninormal' (see order_cells.R:1266 and expr_models.R:42). If "
+            "loading a legacy h5ad written by an earlier monocle2-python, run:\n"
+            "    adata.uns['monocle2']['expression_family'] = 'uninormal'\n"
+            "and re-save."
+        )
     raise ValueError(f"Unknown expression family: {name!r}")

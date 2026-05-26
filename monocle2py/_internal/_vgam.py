@@ -103,8 +103,10 @@ def calculate_nb_dispersion_hint(
 #: vfamily values whose response is fed to the GLM on the log10 scale
 #: (mirroring R's ``fit_model_helper`` else-branch at ``expr_models.R:45-47``).
 #: ``responseMatrix`` therefore applies ``10^predict(.)`` to invert the
-#: transform for these families (``expr_models.R:158-160``).
-LOG10_RESPONSE_FAMILIES = frozenset({"gaussianff", "Tobit", "tobit"})
+#: transform for these families (``expr_models.R:158-160``). Only Tobit
+#: receives the log10 treatment in Monocle2 R; ``uninormal`` and
+#: ``binomialff`` use raw response (handled in :func:`make_response`).
+LOG10_RESPONSE_FAMILIES = frozenset({"Tobit", "tobit"})
 
 
 def make_response(
@@ -120,8 +122,8 @@ def make_response(
             x = x / np.asarray(size_factor, dtype=float)
         return np.round(x).astype(float)
     # R ``fit_model_helper`` (expr_models.R:42-47): ``uninormal`` and
-    # ``binomialff`` use the raw response; everything else (``gaussianff``,
-    # ``Tobit``, …) uses ``log10(x)``.
+    # ``binomialff`` use the raw response; everything else (``Tobit``, …)
+    # uses ``log10(x)``.
     if family_name in ("uninormal", "binomialff"):
         return x
     return np.log10(x)
@@ -141,7 +143,7 @@ def make_family(family_name: str, alpha: float = 1.0) -> Any:
         if not math.isfinite(alpha) or alpha <= 0:
             return sm.families.Poisson()
         return sm.families.NegativeBinomial(alpha=float(alpha))
-    if family_name in ("uninormal", "gaussianff", "Tobit", "tobit"):
+    if family_name in ("uninormal", "Tobit", "tobit"):
         return sm.families.Gaussian()
     if family_name == "binomialff":
         return sm.families.Binomial()

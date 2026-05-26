@@ -116,12 +116,37 @@ def normalize_expr_data(
                 "Tobit expression family only supports 'log' or 'none' "
                 f"normalisation; got {norm_method!r}."
             )
-    elif family.vfamily == "gaussianff":
+    elif family.vfamily == "uninormal":
         if norm_method != "none":
             raise ValueError(
-                "gaussianff family only supports norm_method='none'."
+                "uninormal (Gaussian raw-response) family only supports "
+                "norm_method='none'."
             )
         X = X + pseudo_expr
+    elif family.vfamily == "binomialff":
+        if norm_method != "none":
+            raise ValueError(
+                "binomialff family only supports norm_method='none' "
+                f"(TF-IDF transform); got {norm_method!r}."
+            )
+        # Ports R's TF-IDF on binarized counts (``order_cells.R:1251-1253``):
+        #     ncounts <- FM > 0
+        #     FM <- Matrix::t(Matrix::t(ncounts) * log(1 + ncol/rowSums(ncounts)))
+        # In R the matrix is genes × cells, so ``rowSums(ncounts)`` counts
+        # the cells expressing each gene. Our X is cells × genes, so the
+        # equivalent reduction axis is ``axis=0`` (sum over cells per gene).
+        # Genes with zero counts produce idf=Inf; multiplied by ncounts=0
+        # they propagate as NaN — same as R — and are caught by
+        # downstream ``_drop_nonfinite``.
+        n_cells = X.shape[0]
+        ncounts = (X > 0).astype(np.float64)
+        cells_expressing = ncounts.sum(axis=0)
+        # ``invalid`` covers the deliberate 0 * Inf → NaN propagation for
+        # all-zero genes (R is silent here too — it just produces NaN that
+        # ``_drop_nonfinite`` filters downstream).
+        with np.errstate(divide="ignore", invalid="ignore"):
+            idf = np.log(1.0 + n_cells / cells_expressing)
+            X = ncounts * idf[None, :]
     else:
         raise ValueError(f"Unsupported expression family: {family.vfamily!r}")
 

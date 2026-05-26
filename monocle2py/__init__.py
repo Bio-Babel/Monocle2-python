@@ -33,6 +33,7 @@ from .data import (
     load_paul_gene_set,
 )
 from .families import (
+    binomialff,
     gaussian_family,
     negbinomial,
     negbinomial_size,
@@ -51,6 +52,7 @@ __r_commit__ = "7df1050"
 
 __all__ = [
     "beam",
+    "binomialff",
     "branch_test",
     "build_branch_cell_dataset",
     "cal_abcs",

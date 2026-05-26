@@ -237,7 +237,7 @@ def test_make_response_uninormal_returns_raw() -> None:
         make_response(y, "uninormal", np.ones_like(y), relative_expr=False), y,
     )
     np.testing.assert_allclose(
-        make_response(y, "gaussianff", np.ones_like(y), relative_expr=False),
+        make_response(y, "Tobit", np.ones_like(y), relative_expr=False),
         np.log10(y),
     )
 
@@ -282,8 +282,8 @@ def test_fit_glm_with_fallback_returns_none_for_non_nb_family_failure(
     monkeypatch.setattr(_vgam, "fit_glm", _always_raises)
     result = _vgam.fit_glm_with_fallback(
         np.ones(5), np.ones((5, 2)),
-        _vgam.make_family("gaussianff"),
-        family_name="gaussianff",
+        _vgam.make_family("uninormal"),
+        family_name="uninormal",
     )
     assert result is None
 
@@ -533,7 +533,7 @@ def test_normalize_expr_data_tobit_rejects_invalid_norm_method() -> None:
 
 
 def test_normalize_expr_data_gaussian_family_path() -> None:
-    """Cover the ``gaussianff`` branch."""
+    """Cover the ``uninormal`` (Gaussian raw-response) branch."""
     from monocle2py import normalize_expr_data
 
     rng = np.random.default_rng(7)
@@ -689,7 +689,7 @@ def test_family_from_name_registry_roundtrips_all_vfamilies() -> None:
         family_from_name, GaussianFamily, Negbinomial, NegbinomialSize, Tobit,
     )
     cases = [
-        ("gaussianff", GaussianFamily),
+        ("uninormal", GaussianFamily),
         ("negbinomial", Negbinomial),
         ("negbinomial.size", NegbinomialSize),
         ("Tobit", Tobit),

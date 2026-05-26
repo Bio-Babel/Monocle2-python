@@ -109,7 +109,7 @@ def test_normalize_expr_data_unsupported_family_raises() -> None:
 
 
 def test_normalize_expr_data_gaussian_rejects_non_none_norm() -> None:
-    """``gaussianff`` only supports ``norm_method='none'``
+    """``uninormal`` only supports ``norm_method='none'``
     (``dim_reduction.py:120-123``)."""
     from monocle2py import gaussian_family, normalize_expr_data
 
@@ -120,8 +120,96 @@ def test_normalize_expr_data_gaussian_rejects_non_none_norm() -> None:
                                    index=["a", "b", "c"]),
         expression_family=gaussian_family(),
     )
-    with pytest.raises(ValueError, match="gaussianff"):
+    with pytest.raises(ValueError, match="uninormal"):
         normalize_expr_data(adata, norm_method="log")
+
+
+# ---------------------------------------------------------------------------
+# binomialff: 7th normalization cell — TF-IDF on binarized counts
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_expr_data_binomialff_tfidf_matches_r_formula() -> None:
+    """Port of ``order_cells.R:1251-1253``: TF-IDF on binarized counts.
+
+    R formula (R-orientation, genes x cells):
+        ncounts <- FM > 0
+        FM <- t(t(ncounts) * log(1 + ncol(ncounts)/rowSums(ncounts)))
+
+    Re-derive in Python and compare bitwise.
+    """
+    from monocle2py import binomialff, normalize_expr_data
+
+    rng = np.random.default_rng(0)
+    n_cells, n_genes = 50, 20
+    counts = (rng.random((n_cells, n_genes)) < 0.4).astype(np.float64)
+    # guarantee no all-zero genes so the comparison is finite
+    counts[0, :] = 1.0
+    adata = new_cell_dataset(
+        counts,
+        pheno_data=pd.DataFrame(index=[f"c{i}" for i in range(n_cells)]),
+        feature_data=pd.DataFrame(
+            {"gene_short_name": [f"g{j}" for j in range(n_genes)]},
+            index=[f"g{j}" for j in range(n_genes)],
+        ),
+        expression_family=binomialff(),
+    )
+    FM = normalize_expr_data(adata, norm_method="none")
+
+    # R-faithful reference derivation
+    ncounts = (counts > 0).astype(np.float64)
+    cells_expressing = ncounts.sum(axis=0)
+    idf_ref = np.log(1.0 + n_cells / cells_expressing)
+    FM_ref = (ncounts * idf_ref).T   # genes x cells, matching R
+    np.testing.assert_allclose(FM, FM_ref)
+
+
+def test_normalize_expr_data_binomialff_rejects_log_and_vst() -> None:
+    """R ``order_cells.R:1254-1256`` stops if user asks for log/vstExprs
+    with binomialff. Python raises ValueError with the same intent."""
+    from monocle2py import binomialff, normalize_expr_data
+
+    adata = new_cell_dataset(
+        (np.eye(6, 4)).astype(float),
+        pheno_data=pd.DataFrame(index=[f"c{i}" for i in range(6)]),
+        feature_data=pd.DataFrame(
+            {"gene_short_name": list("abcd")}, index=list("abcd"),
+        ),
+        expression_family=binomialff(),
+    )
+    with pytest.raises(ValueError, match="binomialff family only supports"):
+        normalize_expr_data(adata, norm_method="log")
+    with pytest.raises(ValueError, match="binomialff family only supports"):
+        normalize_expr_data(adata, norm_method="vstExprs")
+
+
+def test_normalize_expr_data_binomialff_zero_count_genes_propagate_nan() -> None:
+    """A gene with zero expression across all cells produces idf=Inf
+    and Inf*0 = NaN. R does the same; ``_drop_nonfinite`` downstream
+    filters the row, so we let NaN propagate here rather than pre-fixing."""
+    from monocle2py import binomialff, normalize_expr_data
+
+    counts = np.array(
+        [
+            [1.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )  # column 1 (gene index 1) is all zero
+    adata = new_cell_dataset(
+        counts,
+        pheno_data=pd.DataFrame(index=["c0", "c1", "c2"]),
+        feature_data=pd.DataFrame(
+            {"gene_short_name": ["g0", "g1", "g2"]}, index=["g0", "g1", "g2"],
+        ),
+        expression_family=binomialff(),
+    )
+    FM = normalize_expr_data(adata, norm_method="none")
+    # FM is (genes x cells); the all-zero gene row must be NaN
+    assert np.isnan(FM[1, :]).all()
+    # The other rows must be finite and equal to ncounts * idf
+    assert np.isfinite(FM[0, :]).all()
+    assert np.isfinite(FM[2, :]).all()
 
 
 # ---------------------------------------------------------------------------
