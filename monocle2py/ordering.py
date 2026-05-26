@@ -481,11 +481,12 @@ def _order_cells_ddrtree(
     # unique ints so repeated calls are idempotent.
     state_col = adata.obs["State"]
     if not isinstance(state_col.dtype, pd.CategoricalDtype):
-        values = state_col.to_numpy()
-        try:
-            values = values.astype(np.int64)
-        except (TypeError, ValueError):
-            pass
+        # State here was either just produced by ``_extract_ordering`` as
+        # int64 (line 473) or preserved from a previous ``order_cells``
+        # call. Either way it must round-trip cleanly to int64; any
+        # non-numeric content means an upstream contract violation and
+        # should raise rather than be silently coerced to object dtype.
+        values = state_col.to_numpy().astype(np.int64)
         categories = np.unique(values)
         adata.obs["State"] = pd.Categorical(values, categories=categories)
     adata.obs["Parent"] = parent_names
@@ -513,7 +514,6 @@ def _order_cells_ddrtree(
 def order_cells(
     adata: AnnData,
     root_state: int | None = None,
-    num_paths: int | None = None,
     reverse: bool | None = None,
 ) -> AnnData:
     """Assign each cell a ``Pseudotime`` and ``State`` along the trajectory.
@@ -526,11 +526,28 @@ def order_cells(
     root_state : int, optional
         State to use as the root of the trajectory. Requires a prior
         ``order_cells`` call so ``adata.obs['State']`` exists.
-    num_paths : int, optional
-        Number of branches to allow. Only meaningful for ICA (not ported);
-        kept for signature parity and ignored for DDRTree.
     reverse : bool, optional
-        If True, swap the diameter endpoints when picking the root.
+        If True, swap the principal-graph MST diameter endpoint used as
+        the root. This mirrors R's DDRTree path: ``select_root_cell``
+        (``order_cells.R:1014-1019``) picks ``diameter[1]`` by default
+        and ``diameter[length(diameter)]`` when ``reverse=TRUE``. Note
+        this does **not** negate the resulting ``Pseudotime`` scalar —
+        pseudotime is still measured as cumulative arc length from the
+        (newly chosen) root, so the two ``reverse`` outputs are not
+        related by ``t -> max(t) - t``. R's ``reverse_ordering`` helper
+        (``order_cells.R:789``) that does negate pseudotime lives only
+        on the ICA branch, which we do not port.
+
+    Notes
+    -----
+    R's ``orderCells(cds, root_state, num_paths, reverse)`` carries a
+    ``num_paths`` parameter that gates the ICA branch's k-cut behaviour
+    and is silently ignored for DDRTree (R emits a warning at
+    ``order_cells.R:1118-1119``). Since we do not port the ICA branch,
+    we drop ``num_paths`` from this signature entirely — passing it
+    raises the default ``TypeError: got an unexpected keyword argument
+    'num_paths'``, which is louder and more accurate feedback than an
+    accept-and-ignore stub.
 
     Returns
     -------
@@ -549,8 +566,5 @@ def order_cells(
         raise NotImplementedError(
             f"order_cells only ports the DDRTree branch (got {dim_reduce_type!r})."
         )
-    if num_paths is not None:
-        # R prints a warning here; we silently ignore for DDRTree.
-        pass
     _order_cells_ddrtree(adata, root_state=root_state, reverse=bool(reverse))
     return adata

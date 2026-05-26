@@ -73,6 +73,50 @@ def _validate_terms(formula_strs: Sequence[str], obs: pd.DataFrame) -> None:
                 )
 
 
+def _map_per_gene(
+    worker,
+    n_items: int,
+    cores: int,
+    args: tuple,
+):
+    """Run ``worker(i, *args)`` for ``i in range(n_items)``.
+
+    ``cores == 1`` stays on a pure serial list comprehension — no joblib
+    import, no IPC. ``cores > 1`` dispatches via :class:`joblib.Parallel`
+    with the default ``loky`` backend. All worker arguments are passed
+    positionally so that joblib can auto-memmap shared NumPy arrays that
+    exceed ``max_nbytes`` (default 1 MB) rather than re-pickling them per
+    call.
+
+    Mirrors the role of R's ``mclapply``/``cores`` argument across
+    ``differentialGeneTest``, ``fit_models``, and ``responseMatrix``.
+    """
+    if cores <= 1:
+        return [worker(i, *args) for i in range(n_items)]
+    from joblib import Parallel, delayed
+    return Parallel(n_jobs=cores)(
+        delayed(worker)(i, *args) for i in range(n_items)
+    )
+
+
+def _fit_one_gene_indexed(
+    i: int,
+    X: np.ndarray,
+    full_X: np.ndarray,
+    reduced_X: np.ndarray,
+    family: Any,
+    disp_func,
+    relative_expr: bool,
+    sfs: np.ndarray,
+    verbose: bool,
+) -> FitOutcome:
+    """Top-level wrapper so :func:`_fit_one_gene` can be dispatched via joblib."""
+    return _fit_one_gene(
+        X[:, i], full_X, reduced_X, family, disp_func,
+        relative_expr, sfs, verbose,
+    )
+
+
 def _gene_dispersion_alpha(
     disp_func,
     x_orig: np.ndarray,
@@ -212,7 +256,11 @@ def differential_gene_test(
         For negbinomial families, divide each cell's counts by
         ``obs['Size_Factor']`` before rounding.
     cores : int, default 1
-        Accepted for signature parity; per-gene fits run serially.
+        Number of joblib workers for the per-gene LRT fits. ``cores=1``
+        keeps a pure-serial fast path (no joblib import, no IPC); any
+        value > 1 dispatches via ``joblib.Parallel`` with the default
+        ``loky`` backend. R uses ``mclapply`` here (R
+        ``differential_expression.R:164-179``).
     verbose : bool, default False
         Print the exception when a gene's fit fails.
 
@@ -246,19 +294,23 @@ def differential_gene_test(
     disp_func = info.get("disp_func") if info is not None else None
 
     X = _dense_expression(adata)
-    records: list[dict[str, Any]] = []
     gene_ids = adata.var_names.astype(str).to_numpy()
-    for i in range(adata.n_vars):
-        out = _fit_one_gene(
-            X[:, i], full_X, reduced_X, family, disp_func,
-            relative_expr, sfs, verbose,
-        )
-        records.append({
+    outs = _map_per_gene(
+        _fit_one_gene_indexed,
+        n_items=adata.n_vars,
+        cores=cores,
+        args=(X, full_X, reduced_X, family, disp_func,
+              relative_expr, sfs, verbose),
+    )
+    records = [
+        {
             "gene_id": gene_ids[i],
             "status": out.status,
             "family": out.family,
             "pval": out.pval,
-        })
+        }
+        for i, out in enumerate(outs)
+    ]
 
     res = pd.DataFrame(records).set_index("gene_id")
     qval = np.ones(len(res), dtype=float)
@@ -274,6 +326,67 @@ def differential_gene_test(
     return merged.reindex(gene_ids)
 
 
+def _predict_one_indexed(
+    i: int,
+    fits: Sequence[Any],
+    X_new: np.ndarray | None,
+):
+    """Worker for :func:`response_matrix`. Returns the predicted mean or ``None``.
+
+    Wraps the predict / fittedvalues access in :class:`_SuppressWarnings`
+    so the per-gene call works correctly whether running serially or
+    inside a joblib worker process (the outer context manager would not
+    cross the IPC boundary).
+    """
+    fit = fits[i]
+    if fit is None:
+        return None
+    with _SuppressWarnings():
+        if X_new is not None:
+            mu = np.asarray(fit.predict(X_new))
+        else:
+            mu = np.asarray(fit.fittedvalues)
+        # R ``responseMatrix`` (``expr_models.R:158-160``) inverts the
+        # log10 response transform for Gaussian/Tobit-style families.
+        fit_family = getattr(fit, "_monocle2py_family_name", None)
+        if fit_family in LOG10_RESPONSE_FAMILIES:
+            mu = np.power(10.0, mu)
+    return mu
+
+
+def _fit_one_for_models(
+    i: int,
+    expr: np.ndarray,
+    X_design: np.ndarray,
+    family: Any,
+    disp_func,
+    relative_expr: bool,
+    sfs: np.ndarray,
+):
+    """Worker for :func:`fit_models`. Returns the per-gene fit or ``None``.
+
+    Lifted to module scope so :class:`joblib.Parallel` can ship it to
+    worker processes by qualified name. Try/except blocks mirror R's
+    ``tryCatch`` in ``fit_model_helper`` (``expr_models.R:48-95``).
+    """
+    family_name = family.vfamily
+    x = expr[:, i]
+    y = make_response(x, family_name, sfs, relative_expr)
+    alpha = _gene_dispersion_alpha(disp_func, x, family)
+    if isinstance(family, Negbinomial):
+        try:
+            return fit_joint_nb(y, X_design, start_alpha=alpha)
+        except Exception:
+            return None
+    if isinstance(family, Tobit):
+        try:
+            return fit_tobit(y, X_design, lower=family.lower, upper=family.upper)
+        except Exception:
+            return None
+    gfamily = make_family(family_name, alpha=alpha)
+    return fit_glm_with_fallback(y, X_design, gfamily, family_name)
+
+
 def fit_models(
     adata: AnnData,
     model_formula_str: str = DEFAULT_FULL_FORMULA,
@@ -281,6 +394,9 @@ def fit_models(
     cores: int = 1,
 ) -> dict[str, Any]:
     """Fit one GLM per gene. Internal helper for ``gen_smooth_curves``.
+
+    ``cores`` is forwarded to :func:`_map_per_gene`: ``cores=1`` runs a
+    pure serial loop, ``cores>1`` dispatches via :class:`joblib.Parallel`.
 
     Returns a mapping ``gene_id -> statsmodels GLMResults`` (or ``None``
     when a gene's fit fails).
@@ -303,28 +419,14 @@ def fit_models(
     disp_func = info.get("disp_func") if info is not None else None
 
     expr = _dense_expression(adata)
-    out: dict[str, Any] = {}
-    for i, gene in enumerate(adata.var_names.astype(str)):
-        x = expr[:, i]
-        y = make_response(x, family.vfamily, sfs, relative_expr)
-        alpha = _gene_dispersion_alpha(disp_func, x, family)
-        if isinstance(family, Negbinomial):
-            try:
-                out[gene] = fit_joint_nb(y, X_design, start_alpha=alpha)
-            except Exception:
-                out[gene] = None
-            continue
-        if isinstance(family, Tobit):
-            try:
-                out[gene] = fit_tobit(
-                    y, X_design, lower=family.lower, upper=family.upper,
-                )
-            except Exception:
-                out[gene] = None
-            continue
-        gfamily = make_family(family.vfamily, alpha=alpha)
-        out[gene] = fit_glm_with_fallback(y, X_design, gfamily, family.vfamily)
-    return out
+    gene_names = adata.var_names.astype(str)
+    fits = _map_per_gene(
+        _fit_one_for_models,
+        n_items=adata.n_vars,
+        cores=cores,
+        args=(expr, X_design, family, disp_func, relative_expr, sfs),
+    )
+    return dict(zip(gene_names, fits))
 
 
 def response_matrix(
@@ -351,7 +453,9 @@ def response_matrix(
         Retained for signature parity; the fitted mean is returned for NB
         and Gaussian families.
     cores : int, default 1
-        Accepted for signature parity.
+        ``cores=1`` keeps a serial loop; ``cores>1`` dispatches per-gene
+        predictions via :class:`joblib.Parallel`. R's ``responseMatrix``
+        uses ``mclapply`` (``expr_models.R:158-160``).
 
     Returns
     -------
@@ -375,32 +479,21 @@ def response_matrix(
         X_new = None
         col_names = None
 
-    preds: list[np.ndarray | None] = []
-    names: list[str] = []
-    # R's ``responseMatrix`` runs ``predict(x, ...)`` inside
-    # ``mclapply``; when the underlying glm is degenerate the prediction
-    # triggers GLM-family RuntimeWarnings. R's glm predict is silent on
-    # numerical edge cases, but statsmodels' NB / Poisson families emit
-    # ``log(0*mu)`` warnings via ``loglike_obs`` during predict + llf
-    # access. Wrap the consumer loop the same way ``fit_model_helper``
-    # wraps vglm (R ``expr_models.R:48-82 suppressWarnings``).
-    with _SuppressWarnings():
-        for name, fit in items:
-            names.append(str(name))
-            if fit is None:
-                preds.append(None)
-                continue
-            if X_new is not None:
-                mu = np.asarray(fit.predict(X_new))
-            else:
-                mu = np.asarray(fit.fittedvalues)
-            # R's responseMatrix (expr_models.R:158-160) inverts the log10 response
-            # transform for Gaussian/Tobit-style families. NB and uninormal paths
-            # return predictions on the response scale directly.
-            fit_family = getattr(fit, "_monocle2py_family_name", None)
-            if fit_family in LOG10_RESPONSE_FAMILIES:
-                mu = np.power(10.0, mu)
-            preds.append(mu)
+    names = [str(name) for name, _ in items]
+    fits = [fit for _, fit in items]
+    # R's ``responseMatrix`` runs ``predict(x, ...)`` inside ``mclapply``;
+    # when the underlying glm is degenerate, the prediction triggers
+    # GLM-family RuntimeWarnings. Mirror R's per-item ``suppressWarnings``
+    # by pushing the context manager into :func:`_predict_one_indexed`,
+    # so the same code is correct serially and inside joblib workers
+    # (the outer context manager couldn't follow workers across the IPC
+    # boundary).
+    preds = _map_per_gene(
+        _predict_one_indexed,
+        n_items=len(fits),
+        cores=cores,
+        args=(fits, X_new),
+    )
 
     shapes = [p.shape[0] for p in preds if p is not None]
     if not shapes:
@@ -436,6 +529,8 @@ def gen_smooth_curves(
     relative_expr : bool, default True
     response_type : str, default ``"response"``
     cores : int, default 1
+        Forwarded to :func:`fit_models` and :func:`response_matrix` so
+        per-gene fits and predictions both run in parallel when > 1.
 
     Returns
     -------

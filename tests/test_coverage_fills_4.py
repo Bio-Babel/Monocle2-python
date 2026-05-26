@@ -252,37 +252,28 @@ def test_order_cells_rejects_non_ddrtree_reduction() -> None:
         order_cells(cds)
 
 
-def test_order_cells_num_paths_is_ignored_for_ddrtree() -> None:
-    """R's ``orderCells`` ignores ``num_paths`` for DDRTree (only ICA
-    uses it). Python must produce the same Pseudotime/State whether or
-    not ``num_paths`` is passed (``ordering.py:552-554``)."""
-    def _fresh():
-        rng = np.random.default_rng(0)
-        X = rng.negative_binomial(4, 0.5, size=(40, 15)).astype(float)
-        c = new_cell_dataset(
-            X, pheno_data=pd.DataFrame(index=[f"C{i}" for i in range(40)]),
-            feature_data=pd.DataFrame(
-                {"gene_short_name": [f"G{i}" for i in range(15)]},
-                index=[f"G{i}" for i in range(15)],
-            ),
-            expression_family=negbinomial_size(),
-        )
-        estimate_size_factors(c)
-        reduce_dimension(
-            c, reduction_method="DDRTree",
-            auto_param_selection=False, max_iter=5,
-        )
-        return c
-
-    c0 = _fresh(); order_cells(c0)
-    c1 = _fresh(); order_cells(c1, num_paths=99)
-    np.testing.assert_allclose(
-        c0.obs["Pseudotime"].to_numpy(), c1.obs["Pseudotime"].to_numpy(),
+def test_order_cells_rejects_num_paths_kwarg() -> None:
+    """``num_paths`` was an ICA-only R parameter; we don't port ICA, so
+    we don't accept it either. Passing it must raise ``TypeError`` rather
+    than silently doing nothing — louder feedback for R users porting
+    scripts than an accept-and-ignore stub."""
+    rng = np.random.default_rng(0)
+    X = rng.negative_binomial(4, 0.5, size=(40, 15)).astype(float)
+    cds = new_cell_dataset(
+        X, pheno_data=pd.DataFrame(index=[f"C{i}" for i in range(40)]),
+        feature_data=pd.DataFrame(
+            {"gene_short_name": [f"G{i}" for i in range(15)]},
+            index=[f"G{i}" for i in range(15)],
+        ),
+        expression_family=negbinomial_size(),
     )
-    np.testing.assert_array_equal(
-        c0.obs["State"].astype(int).to_numpy(),
-        c1.obs["State"].astype(int).to_numpy(),
+    estimate_size_factors(cds)
+    reduce_dimension(
+        cds, reduction_method="DDRTree",
+        auto_param_selection=False, max_iter=5,
     )
+    with pytest.raises(TypeError, match="num_paths"):
+        order_cells(cds, num_paths=99)
 
 
 # ---------------------------------------------------------------------------

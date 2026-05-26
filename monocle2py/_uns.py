@@ -7,8 +7,9 @@ mapping in ``port_reports/monocle2/05_design.md``.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
+import numpy as np
 from anndata import AnnData
 
 __all__ = [
@@ -129,20 +130,58 @@ def set_lower_detection_limit(adata: AnnData, value: float) -> None:
     ensure_state(adata)["lower_detection_limit"] = float(value)
 
 
+def _make_disp_func(
+    coefficients: dict[str, float],
+) -> Callable[[np.ndarray], np.ndarray]:
+    """Build the dispersion-vs-mean closure from fitted coefficients.
+
+    Kept as a factory rather than stored alongside ``coefficients`` because
+    Python callables are not h5ad-serialisable; rebuilding on retrieval is
+    cheap (closure captures two floats) and keeps ``adata.uns['monocle2']``
+    round-trippable through ``adata.write_h5ad`` / ``read_h5ad``.
+    """
+    a = float(coefficients["asymptDisp"])
+    b = float(coefficients["extraPois"])
+
+    def disp_func(q: np.ndarray) -> np.ndarray:
+        q = np.asarray(q, dtype=float)
+        return a + b / q
+
+    return disp_func
+
+
 def get_disp_fit_info(
     adata: AnnData, name: str = "blind"
 ) -> dict[str, Any] | None:
-    """Return the dispersion fit result registered under *name*, or ``None``."""
+    """Return the dispersion fit result registered under *name*, or ``None``.
+
+    The persisted dict only carries h5ad-safe payload (``disp_table`` and
+    ``coefficients``). ``disp_func`` is reconstructed on the fly from
+    ``coefficients`` so downstream callers (``differential_gene_test``,
+    ``dispersion_table``, etc.) see a consistent dict whether the AnnData
+    was just fitted or freshly loaded from disk.
+    """
     state = get_state(adata)
     fits = state.get("disp_fit_info")
     if fits is None:
         return None
-    return fits.get(name)
+    persisted = fits.get(name)
+    if persisted is None:
+        return None
+    info = dict(persisted)
+    if "disp_func" not in info and "coefficients" in info:
+        info["disp_func"] = _make_disp_func(info["coefficients"])
+    return info
 
 
 def set_disp_fit_info(
     adata: AnnData, info: dict[str, Any], name: str = "blind"
 ) -> None:
+    """Persist a dispersion fit. Strips non-serialisable ``disp_func``
+    entries — the canonical persisted shape is ``disp_table`` plus
+    ``coefficients``; ``get_disp_fit_info`` rebuilds the closure on read.
+    """
     state = ensure_state(adata)
     fits = state.setdefault("disp_fit_info", {})
-    fits[name] = info
+    persisted = {k: v for k, v in info.items() if k != "disp_func"}
+    fits[name] = persisted

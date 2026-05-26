@@ -30,6 +30,7 @@ __all__ = [
     "build_branch_cell_dataset",
     "branch_test",
     "beam",
+    "cal_abcs",
     "cal_ilrs",
 ]
 
@@ -695,3 +696,139 @@ def cal_ilrs(
             ),
         }
     return logfc_df
+
+
+def cal_abcs(
+    adata: AnnData,
+    trend_formula: str = "~sm.ns(Pseudotime, df=3)*Branch",
+    branch_point: int = 1,
+    trajectory_states: Optional[Sequence[int]] = None,
+    relative_expr: bool = True,
+    stretch: bool = True,
+    cores: int = 1,
+    verbose: bool = False,
+    num: int = 5000,
+    branch_labels: Optional[Sequence[str]] = None,
+) -> pd.DataFrame:
+    """Area Between Curves (ABC) score per gene across two branches.
+
+    Ports R's ``calABCs`` (``BEAM.R:373-489``): builds a branch CDS via
+    progenitor duplication, smooths the trend formula along the merged
+    pseudotime, evaluates each branch on a ``num``-point grid, and
+    integrates the signed difference ``f_A(t) - f_B(t)`` by the
+    trapezoidal rule. Genes whose branch curves diverge most strongly
+    receive the largest absolute ``ABCs``; the sign indicates which
+    branch is higher overall.
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        Must have been processed with :func:`~monocle2py.order_cells`.
+    trend_formula : str, default ``"~sm.ns(Pseudotime, df=3)*Branch"``
+        The branch-aware trend model passed to :func:`gen_smooth_curves`.
+    branch_point : int, default 1
+        Which branch point to split at (1-based, ordered by pseudotime).
+        Ignored when ``trajectory_states`` is given.
+    trajectory_states : sequence of int, optional
+        Pair of State IDs to use as the two branches. Overrides
+        ``branch_point`` when supplied.
+    relative_expr : bool, default True
+        Forwarded to :func:`gen_smooth_curves`; for negbinomial families
+        divides counts by ``obs['Size_Factor']`` before fitting.
+    stretch : bool, default True
+        Rescale each branch's pseudotime to ``[0, 100]`` before fitting,
+        matching R's default. The trapezoidal step is fixed at
+        ``100/(num-1)`` to mirror R's hard-coded scaling.
+    cores : int, default 1
+        Number of joblib workers for the per-gene GLM fits inside
+        :func:`gen_smooth_curves`.
+    verbose : bool, default False
+        Propagated to the underlying solvers.
+    num : int, default 5000
+        Number of pseudotime points on which both branch curves are
+        evaluated. Matches R's default.
+    branch_labels : sequence of str, optional
+        Two names assigned to the branches in the duplicated CDS.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Indexed by gene with one column ``ABCs`` plus every column of
+        ``adata.var`` (matching R's ``merge(ABCs_res, fData(cds))``).
+
+    Notes
+    -----
+    R rounds each gene's ABC to 3 decimals (``round(..., 3)``); we mirror
+    that exactly so downstream comparisons against R outputs are
+    byte-faithful.
+
+    R's ``calABCs`` signature also accepts ``min_expr`` and
+    ``integer_expression`` (``BEAM.R:381-382``), but the function body
+    never references them — they are dead in R itself. We drop them
+    rather than carry the stub forward; passing them raises the default
+    ``TypeError: got an unexpected keyword argument ...``.
+    """
+    if trajectory_states is not None and len(trajectory_states) != 2:
+        raise ValueError(
+            "cal_abcs only supports the calculation of ABCs between TWO branches"
+        )
+
+    subset = build_branch_cell_dataset(
+        adata,
+        progenitor_method="duplicate",
+        branch_states=trajectory_states,
+        branch_point=branch_point,
+        branch_labels=branch_labels,
+        stretch=stretch,
+    )
+    overlap_rng = (0.0, float(subset.obs["Pseudotime"].max()))
+    trajectory_labels = list(subset.obs["Branch"].cat.categories)
+    if len(trajectory_labels) != 2:
+        raise RuntimeError(
+            f"Expected two branches after subset, got {trajectory_labels}"
+        )
+    if verbose:
+        print(
+            f"[cal_abcs] pseudotime range for branch curves: "
+            f"{overlap_rng[0]} {overlap_rng[1]}"
+        )
+
+    formula_vars = formula_terms(trend_formula)
+    branch_var = next(
+        (v for v in formula_vars if v in subset.obs.columns and v != "Pseudotime"),
+        "Branch",
+    )
+    grid = np.linspace(overlap_rng[0], overlap_rng[1], num)
+    new_A = pd.DataFrame({
+        "Pseudotime": grid,
+        branch_var: pd.Categorical(
+            [trajectory_labels[0]] * num, categories=trajectory_labels,
+        ),
+    }, index=[f"A_{i}" for i in range(num)])
+    new_B = pd.DataFrame({
+        "Pseudotime": grid,
+        branch_var: pd.Categorical(
+            [trajectory_labels[1]] * num, categories=trajectory_labels,
+        ),
+    }, index=[f"B_{i}" for i in range(num)])
+    new_data = pd.concat([new_A, new_B], axis=0)
+
+    curves = gen_smooth_curves(
+        subset, new_data, trend_formula=trend_formula,
+        relative_expr=relative_expr, cores=cores,
+    )
+    mat_A = curves.iloc[:, :num].to_numpy(dtype=float)
+    mat_B = curves.iloc[:, num:].to_numpy(dtype=float)
+
+    diff = mat_A - mat_B
+    # R: step <- (100 / (num - 1)); avg_delta_x <- (x[1:(num-1)] + x[2:num]) / 2;
+    #    res <- round(sum(avg_delta_x * step), 3)
+    step = 100.0 / (num - 1)
+    avg_delta = 0.5 * (diff[:, :-1] + diff[:, 1:])
+    abcs = np.round(np.sum(avg_delta * step, axis=1), 3)
+
+    gene_index = curves.index.astype(str)
+    out = pd.DataFrame({"ABCs": abcs}, index=gene_index)
+    fdata = adata.var.copy()
+    fdata.index = fdata.index.astype(str)
+    return out.join(fdata, how="left")

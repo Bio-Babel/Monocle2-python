@@ -463,13 +463,13 @@ def estimate_dispersions(
 
     asymp, extra = float(coefs[0]), float(coefs[1])
 
-    def disp_func(q: np.ndarray) -> np.ndarray:
-        q = np.asarray(q, dtype=float)
-        return asymp + extra / q
-
+    # Persist only the h5ad-safe payload — disp_table (DataFrame) and the
+    # two fitted coefficients. The dispersion-vs-mean closure is rebuilt
+    # by ``get_disp_fit_info`` from these coefficients on every read, so
+    # callers always see a usable ``disp_func`` while ``adata.write_h5ad``
+    # round-trips without warnings or silent callable drops.
     info = {
         "disp_table": disp_df,
-        "disp_func": disp_func,
         "coefficients": {"asymptDisp": asymp, "extraPois": extra},
     }
     set_disp_fit_info(adata, info, name=model_name)

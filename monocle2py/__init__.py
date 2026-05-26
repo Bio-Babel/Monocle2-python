@@ -1,6 +1,6 @@
 """monocle2py — Python port of the R monocle2 package."""
 
-from .beam import beam, branch_test, build_branch_cell_dataset, cal_ilrs
+from .beam import beam, branch_test, build_branch_cell_dataset, cal_abcs, cal_ilrs
 from .cell_dataset import new_cell_dataset
 from .census import estimate_t, relative2abs
 from .clustering import cluster_cells
@@ -53,6 +53,7 @@ __all__ = [
     "beam",
     "branch_test",
     "build_branch_cell_dataset",
+    "cal_abcs",
     "cal_ilrs",
     "cal_ncenter",
     "cluster_cells",
