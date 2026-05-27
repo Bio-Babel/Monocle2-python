@@ -183,6 +183,65 @@ def test_normalize_expr_data_binomialff_rejects_log_and_vst() -> None:
         normalize_expr_data(adata, norm_method="vstExprs")
 
 
+def test_binomialff_differential_gene_test_end_to_end() -> None:
+    """End-to-end smoke for binomialff through differential_gene_test.
+
+    Exercises the previously-unreachable ``_vgam.py:146`` Binomial GLM
+    branch. The test confirms that the renamed family-class plumbing
+    delivers ``sm.families.Binomial`` to the fit path and that the
+    pipeline returns the standard pval/qval/status schema without
+    requiring size factors or dispersions (neither concept applies to
+    a binomial model)."""
+    from monocle2py import (
+        binomialff, differential_gene_test, estimate_size_factors,
+    )
+
+    rng = np.random.default_rng(0)
+    n_cells, n_peaks = 60, 8
+    # Build a two-group binary signal so a few "genes" will look
+    # differentially open vs. random noise: peaks 0-3 are open in
+    # cells with Pseudotime > 0.5, peaks 4-7 are random noise.
+    pt = np.linspace(0.0, 1.0, n_cells)
+    counts = (rng.random((n_cells, n_peaks)) < 0.3).astype(float)
+    counts[pt > 0.5, :4] = (rng.random((int((pt > 0.5).sum()), 4)) < 0.85).astype(float)
+    counts[pt <= 0.5, :4] = (rng.random((int((pt <= 0.5).sum()), 4)) < 0.10).astype(float)
+
+    adata = new_cell_dataset(
+        counts,
+        pheno_data=pd.DataFrame({"Pseudotime": pt},
+                                  index=[f"c{i}" for i in range(n_cells)]),
+        feature_data=pd.DataFrame(
+            {"gene_short_name": [f"p{j}" for j in range(n_peaks)]},
+            index=[f"p{j}" for j in range(n_peaks)],
+        ),
+        expression_family=binomialff(),
+    )
+    # estimate_size_factors must not be required for binomialff
+    # (Binomial GLM doesn't use offsets); but we set it anyway so the
+    # default Size_Factor=NaN doesn't trip downstream sanity checks
+    # that index by column existence.
+    adata.obs["Size_Factor"] = 1.0
+
+    res = differential_gene_test(
+        adata,
+        full_model_formula_str="~Pseudotime",
+        reduced_model_formula_str="~1",
+        relative_expr=False,   # binomial doesn't need size-factor scaling
+    )
+    assert set(res.columns) >= {"status", "family", "pval", "qval"}
+    assert (res["family"] == "binomialff").all()
+    ok = res["status"] == "OK"
+    assert ok.sum() >= n_peaks // 2, "expected most binomial fits to converge"
+    # peaks 0-3 should have smaller pvals than peaks 4-7 (real signal)
+    pvals_signal = res.loc[ok & res.index.isin([f"p{i}" for i in range(4)]), "pval"]
+    pvals_noise = res.loc[ok & res.index.isin([f"p{i}" for i in range(4, 8)]), "pval"]
+    if len(pvals_signal) and len(pvals_noise):
+        assert pvals_signal.median() < pvals_noise.median(), (
+            f"signal peaks should rank ahead of noise; got median pvals "
+            f"signal={pvals_signal.median():.3g} noise={pvals_noise.median():.3g}"
+        )
+
+
 def test_normalize_expr_data_binomialff_zero_count_genes_propagate_nan() -> None:
     """A gene with zero expression across all cells produces idf=Inf
     and Inf*0 = NaN. R does the same; ``_drop_nonfinite`` downstream

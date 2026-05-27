@@ -433,7 +433,6 @@ def response_matrix(
     models: dict[str, Any] | Sequence[Any],
     newdata: pd.DataFrame | None = None,
     formula_str: str | None = None,
-    response_type: str = "response",
     cores: int = 1,
 ) -> pd.DataFrame:
     """Predicted expression values for a list of GLM fits.
@@ -449,9 +448,6 @@ def response_matrix(
     formula_str : str, optional
         Formula used to build the original design matrix. Required when
         ``newdata`` is supplied so that patsy can build a matching matrix.
-    response_type : str, default ``"response"``
-        Retained for signature parity; the fitted mean is returned for NB
-        and Gaussian families.
     cores : int, default 1
         ``cores=1`` keeps a serial loop; ``cores>1`` dispatches per-gene
         predictions via :class:`joblib.Parallel`. R's ``responseMatrix``
@@ -462,6 +458,15 @@ def response_matrix(
     pandas.DataFrame
         Genes x columns frame; columns are the row index of ``newdata`` when
         supplied, otherwise the fitted-value index.
+
+    Notes
+    -----
+    R's ``responseMatrix`` exposes a ``response_type`` knob forwarded to
+    ``predict(x, type=response_type)`` (supports ``"response"``, ``"link"``,
+    ``"terms"``). Monocle2's own callers only ever use ``"response"``
+    (mean), and so does this port. The parameter is therefore not exposed —
+    callers needing link-scale or term-contribution predictions can use the
+    fit objects from :func:`fit_models` directly.
     """
     if isinstance(models, dict):
         items = list(models.items())
@@ -514,7 +519,6 @@ def gen_smooth_curves(
     new_data: pd.DataFrame,
     trend_formula: str = DEFAULT_FULL_FORMULA,
     relative_expr: bool = True,
-    response_type: str = "response",
     cores: int = 1,
 ) -> pd.DataFrame:
     """Fit the trend formula per gene and return smoothed expression curves.
@@ -527,7 +531,6 @@ def gen_smooth_curves(
         (typically a grid of ``Pseudotime`` values).
     trend_formula : str, default ``"~sm.ns(Pseudotime, df=3)"``
     relative_expr : bool, default True
-    response_type : str, default ``"response"``
     cores : int, default 1
         Forwarded to :func:`fit_models` and :func:`response_matrix` so
         per-gene fits and predictions both run in parallel when > 1.
@@ -543,5 +546,5 @@ def gen_smooth_curves(
     )
     return response_matrix(
         models, newdata=new_data, formula_str=trend_formula,
-        response_type=response_type, cores=cores,
+        cores=cores,
     )
