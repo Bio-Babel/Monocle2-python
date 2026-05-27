@@ -8,6 +8,7 @@ state is written to ``adata.obsm["X_dr"]`` and ``adata.uns["monocle2"]``.
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import ddrtree as _ddrtree
@@ -91,6 +92,17 @@ def normalize_expr_data(
     if family.vfamily in ("negbinomial", "negbinomial.size"):
         _check_size_factors(adata)
         if norm_method == "vstExprs":
+            # Mirror R ``order_cells.R:1217-1218``: vstExprs handles
+            # size-factor scaling internally, so an explicit
+            # ``relative_expr=False`` has no effect on this branch.
+            # R prints a message under exactly the same condition; we
+            # raise a ``UserWarning`` so callers get matching feedback.
+            if not relative_expr:
+                warnings.warn(
+                    "relative_expr is ignored when using norm_method == 'vstExprs'",
+                    UserWarning,
+                    stacklevel=2,
+                )
             vst = vst_exprs(adata, expr_matrix=None, round_vals=False)
             if mask is not None:
                 vst = vst[:, mask]

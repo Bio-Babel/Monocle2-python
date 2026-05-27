@@ -108,6 +108,60 @@ def test_normalize_expr_data_unsupported_family_raises() -> None:
         normalize_expr_data(adata, norm_method="log")
 
 
+def test_normalize_expr_data_vst_warns_on_relative_expr_false() -> None:
+    """R ``order_cells.R:1217-1218`` prints a message when the user
+    explicitly passes ``relative_expr=FALSE`` alongside
+    ``norm_method='vstExprs'`` because vstExprs handles size-factor
+    scaling internally. Python mirrors the trigger condition exactly:
+    raise a ``UserWarning`` only on explicit opt-out; default
+    ``relative_expr=True`` stays silent."""
+    import warnings as _w
+    from monocle2py import (
+        detect_genes,
+        estimate_dispersions,
+        estimate_size_factors,
+        negbinomial_size,
+        normalize_expr_data,
+    )
+
+    rng = np.random.default_rng(0)
+    counts = rng.negative_binomial(8, 0.4, size=(40, 12)).astype(float)
+    adata = new_cell_dataset(
+        counts,
+        pheno_data=pd.DataFrame(index=[f"c{i}" for i in range(40)]),
+        feature_data=pd.DataFrame(
+            {"gene_short_name": [f"g{j}" for j in range(12)]},
+            index=[f"g{j}" for j in range(12)],
+        ),
+        expression_family=negbinomial_size(),
+    )
+    estimate_size_factors(adata)
+    detect_genes(adata, min_expr=0.1)
+    estimate_dispersions(adata)
+
+    # Positive trigger: explicit relative_expr=False fires the warning
+    with pytest.warns(
+        UserWarning, match="relative_expr is ignored when using norm_method"
+    ):
+        FM = normalize_expr_data(
+            adata, norm_method="vstExprs", relative_expr=False,
+        )
+    assert FM.shape == (12, 40)  # genes x cells
+
+    # Negative: default relative_expr=True is silent on this specific message
+    # (anndata/scanpy may emit unrelated warnings, so filter by content).
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        FM2 = normalize_expr_data(
+            adata, norm_method="vstExprs", relative_expr=True,
+        )
+    fired = [
+        w for w in caught if "relative_expr is ignored" in str(w.message)
+    ]
+    assert fired == [], f"warning fired unexpectedly: {[str(w.message) for w in fired]}"
+    np.testing.assert_array_equal(FM, FM2)  # same algorithm, just one was vocal
+
+
 def test_normalize_expr_data_gaussian_rejects_non_none_norm() -> None:
     """``uninormal`` only supports ``norm_method='none'``
     (``dim_reduction.py:120-123``)."""
