@@ -25,8 +25,8 @@ from ggplot2_py import (
 from scipy.sparse import issparse
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
-from .._uns import get_lower_detection_limit, get_state
-from ._helpers import as_dense, feature_label_column
+from .._uns import get_disp_fit_info, get_lower_detection_limit, get_state
+from ._helpers import _vst_or_log, as_dense, feature_label_column
 from ._theme import monocle_theme_opts
 
 __all__ = ["plot_multiple_branches_pseudotime"]
@@ -106,7 +106,7 @@ def plot_multiple_branches_pseudotime(
     branches_name: Sequence[str] | None = None,
     min_expr: float | None = None,
     cell_size: float = 0.75,
-    norm_method: str = "log",
+    norm_method: str = "raw",
     nrow: int | None = None,
     ncol: int = 1,
     panel_order: Sequence[str] | None = None,
@@ -122,7 +122,56 @@ def plot_multiple_branches_pseudotime(
     along the path with LOWESS. The branch-aligned smoothed curves share a
     common (rescaled) pseudotime axis so multiple branches can be compared on
     the same x-axis.
+
+    Parameters
+    ----------
+    norm_method : str, default ``"raw"``
+        Transformation applied to the LOWESS-smoothed values before
+        plotting:
+
+        * ``"raw"`` — pass through. Matches R's *observable* output for
+          any ``norm_method`` (see Notes).
+        * ``"log"`` — ``log10(x + 1.0)``.
+        * ``"vstExprs"`` — variance-stabilising transform. Requires a
+          prior :func:`estimate_dispersions` call (otherwise raises
+          ``RuntimeError``).
+
+        Any other value raises ``ValueError``.
+
+    Notes
+    -----
+    R's ``plot_multiple_branches_pseudotime`` (``plotting.R:2636-2858``)
+    declares ``norm_method`` but its plot data is always raw because of
+    three upstream defects: a dead ``log2(tmp+1)`` melt overwritten by
+    a raw melt at ``plotting.R:2714-2715``; the ``m`` matrix to which
+    ``norm_method`` is actually applied is then discarded; and the
+    ``log`` branch references an undefined ``pseudocount`` so it would
+    crash if ever reached.
+
+    This port keeps R's observable output as the default by introducing
+    an explicit ``"raw"`` value, and additionally provides functional
+    ``"log"`` and ``"vstExprs"`` paths matching the author's apparent
+    intent (using ``pseudocount=1`` from the sibling heatmap functions
+    at ``plotting.R:1145, 2446``). Callers needing R-byte-identical
+    output should pass nothing or ``"raw"``.
     """
+    if norm_method not in ("raw", "log", "vstExprs"):
+        raise ValueError(
+            f"norm_method must be one of 'raw', 'log', 'vstExprs'; "
+            f"got {norm_method!r}"
+        )
+    if norm_method == "vstExprs":
+        # Fail fast before the lowess loop: avoids running smoothing
+        # across thousands of genes only to fail in the first helper
+        # call. The check is O(1).
+        info = get_disp_fit_info(adata, "blind")
+        if info is None or info.get("disp_func") is None:
+            raise RuntimeError(
+                "norm_method='vstExprs' requires a prior "
+                "estimate_dispersions(adata) call. Either run "
+                "estimate_dispersions first or use "
+                "norm_method='log' / 'raw'."
+            )
     if "Pseudotime" not in adata.obs.columns or "State" not in adata.obs.columns:
         raise RuntimeError("Run order_cells before plot_multiple_branches_pseudotime.")
     states = adata.obs["State"].astype(int).to_numpy()
@@ -165,6 +214,18 @@ def plot_multiple_branches_pseudotime(
             )
 
         gene_names = sub.var_names.astype(str).to_numpy()
+
+        # Apply norm_method to the lowess-smoothed values before melting.
+        # ``_vst_or_log`` expects ``genes × cells``; ``smoothed`` is
+        # ``cells × genes`` so we transpose at the call site and back.
+        # This mirrors R's intent on the (discarded) ``m`` matrix at
+        # ``plotting.R:2736-2741`` with ``pseudocount = 1`` imported from
+        # the sibling heatmap functions (``plotting.R:1145, 2446``).
+        if norm_method != "raw":
+            m_df = pd.DataFrame(smoothed.T, index=gene_names)
+            m_df = _vst_or_log(adata, m_df, norm_method)
+            smoothed = np.asarray(m_df.to_numpy().T, dtype=float)
+
         for j, gene in enumerate(gene_names):
             cell_long_frames.append(pd.DataFrame({
                 "f_id": np.repeat(gene, ordered_cells.size),
@@ -177,13 +238,6 @@ def plot_multiple_branches_pseudotime(
     if not cell_long_frames:
         raise RuntimeError("No cells on any of the requested branches.")
     long_df = pd.concat(cell_long_frames, ignore_index=True)
-
-    # R's plot_multiple_branches_pseudotime (plotting.R:2714-2715) has a dead
-    # log2(tmp+1) line overwritten by the raw melt on the next line, so the
-    # plotted data ends up as raw lowess-smoothed values; `norm_method='log'`
-    # only affects the unused `m` matrix. Replicate that here: accept the
-    # argument for API parity but do not apply it to the plot data.
-    _ = norm_method  # intentionally unused; mirrors R's dead-code branch
 
     if min_expr is None:
         min_expr = get_lower_detection_limit(adata)

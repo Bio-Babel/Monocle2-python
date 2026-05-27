@@ -188,3 +188,120 @@ def test_plot_multiple_branches_pseudotime_invalid_branch():
         plot_multiple_branches_pseudotime(
             cds[:, ["G00"]], branches=[999],
         )
+
+
+# ---------------------------------------------------------------------------
+# plot_multiple_branches_pseudotime.norm_method — the three-value contract
+# introduced when fixing the dead-code branch from
+# plotting.R:2714-2715. Defaults to "raw" (= R observable output);
+# "log" and "vstExprs" actually transform via _helpers._vst_or_log;
+# anything else raises ValueError.
+# ---------------------------------------------------------------------------
+
+
+def _plot_mb_pt_long_df(g) -> pd.DataFrame:
+    """Pull the long-form data frame back out of a ggplot object."""
+    # ggplot2_py stores the plot data on the first geom layer
+    data = getattr(g, "data", None)
+    if data is None:
+        raise RuntimeError("could not retrieve plot data from GGPlot")
+    return pd.DataFrame(data)
+
+
+def test_plot_multiple_branches_pseudotime_raw_default_matches_lowess():
+    """The default ``norm_method='raw'`` returns the lowess values
+    untransformed — preserves R-byte-equivalent behavior for callers
+    that don't specify ``norm_method``."""
+    cds = _branching_cds()
+    states = sorted(cds.obs["State"].astype(int).unique().tolist())
+    branches = [s for s in states if s != states[0]][:2]
+    sub = cds[:, ["G00", "G01"]]
+
+    g_default = plot_multiple_branches_pseudotime(sub, branches=branches)
+    g_raw = plot_multiple_branches_pseudotime(
+        sub, branches=branches, norm_method="raw",
+    )
+
+    df_default = _plot_mb_pt_long_df(g_default)
+    df_raw = _plot_mb_pt_long_df(g_raw)
+    np.testing.assert_array_equal(
+        df_default["expression"].to_numpy(),
+        df_raw["expression"].to_numpy(),
+    )
+
+
+def test_plot_multiple_branches_pseudotime_log_applies_log10_plus_one():
+    """``norm_method='log'`` produces ``log10(raw + 1.0)`` element-wise
+    relative to the raw default."""
+    cds = _branching_cds()
+    states = sorted(cds.obs["State"].astype(int).unique().tolist())
+    branches = [s for s in states if s != states[0]][:2]
+    sub = cds[:, ["G00", "G01"]]
+
+    g_raw = plot_multiple_branches_pseudotime(
+        sub, branches=branches, norm_method="raw",
+    )
+    g_log = plot_multiple_branches_pseudotime(
+        sub, branches=branches, norm_method="log",
+    )
+    df_raw = _plot_mb_pt_long_df(g_raw)
+    df_log = _plot_mb_pt_long_df(g_log)
+    np.testing.assert_allclose(
+        df_log["expression"].to_numpy(),
+        np.log10(df_raw["expression"].to_numpy() + 1.0),
+    )
+
+
+def test_plot_multiple_branches_pseudotime_vstExprs_uses_dispersion_fit():
+    """With a dispersion fit installed, ``norm_method='vstExprs'``
+    produces values that differ from raw — the VST has been applied."""
+    cds = _branching_cds()
+    _install_disp_func(cds)
+    states = sorted(cds.obs["State"].astype(int).unique().tolist())
+    branches = [s for s in states if s != states[0]][:2]
+    sub = cds[:, ["G00", "G01"]]
+
+    g_raw = plot_multiple_branches_pseudotime(
+        sub, branches=branches, norm_method="raw",
+    )
+    g_vst = plot_multiple_branches_pseudotime(
+        sub, branches=branches, norm_method="vstExprs",
+    )
+    df_raw = _plot_mb_pt_long_df(g_raw)
+    df_vst = _plot_mb_pt_long_df(g_vst)
+    # VST must move the values (else the path is no-op, the very bug we fixed)
+    assert not np.allclose(
+        df_vst["expression"].to_numpy(),
+        df_raw["expression"].to_numpy(),
+    )
+    # All produced values must be finite (VST should not introduce NaN/Inf
+    # on a well-formed smoothed matrix).
+    assert np.all(np.isfinite(df_vst["expression"].to_numpy()))
+
+
+def test_plot_multiple_branches_pseudotime_vstExprs_without_disp_raises():
+    """Missing dispersion fit: loud RuntimeError pointing the user at
+    ``estimate_dispersions`` — replaces the prior silent fallback.
+    ``_branching_cds`` always installs ``disp_func``; explicitly remove
+    it here to simulate a user who skipped ``estimate_dispersions``."""
+    cds = _branching_cds()
+    cds.uns["monocle2"].pop("disp_fit_info", None)
+    states = sorted(cds.obs["State"].astype(int).unique().tolist())
+    branches = [s for s in states if s != states[0]][:2]
+    with pytest.raises(RuntimeError, match="estimate_dispersions"):
+        plot_multiple_branches_pseudotime(
+            cds[:, ["G00", "G01"]], branches=branches, norm_method="vstExprs",
+        )
+
+
+def test_plot_multiple_branches_pseudotime_invalid_norm_method_raises():
+    """Anything outside ``{'raw', 'log', 'vstExprs'}`` raises ValueError."""
+    cds = _branching_cds()
+    states = sorted(cds.obs["State"].astype(int).unique().tolist())
+    branches = [s for s in states if s != states[0]][:2]
+    with pytest.raises(
+        ValueError, match=r"must be one of 'raw', 'log', 'vstExprs'"
+    ):
+        plot_multiple_branches_pseudotime(
+            cds[:, ["G00"]], branches=branches, norm_method="banana",
+        )

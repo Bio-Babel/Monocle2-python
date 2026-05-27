@@ -23,8 +23,7 @@ from scipy.spatial.distance import squareform
 from .._uns import get_disp_fit_info
 from ..beam import build_branch_cell_dataset
 from ..differential import gen_smooth_curves
-from ..preprocess import vst_exprs
-from ._helpers import feature_label_column
+from ._helpers import _vst_or_log, feature_label_column
 from .branches import _branch_path_cells
 
 __all__ = [
@@ -92,18 +91,6 @@ def _row_center_scale(matrix: np.ndarray) -> np.ndarray:
             centered, std, out=np.zeros_like(centered), where=std > 0,
         )
     return out
-
-
-def _vst_or_log(
-    adata: AnnData, m: pd.DataFrame, norm_method: str,
-    pseudocount: float = 1.0,
-) -> pd.DataFrame:
-    if norm_method == "vstExprs":
-        info = get_disp_fit_info(adata, "blind")
-        if info is not None and info.get("disp_func") is not None:
-            arr = vst_exprs(adata, expr_matrix=m.to_numpy().T).T
-            return pd.DataFrame(arr, index=m.index, columns=m.columns)
-    return np.log10(m + pseudocount)
 
 
 def _clip_and_filter(

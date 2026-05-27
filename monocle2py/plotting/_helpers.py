@@ -17,9 +17,11 @@ from scipy.sparse import issparse
 
 from .._uns import (
     SIZE_FACTOR_COL,
+    get_disp_fit_info,
     get_expression_family,
     get_lower_detection_limit,
 )
+from ..preprocess import vst_exprs
 
 __all__ = [
     "rotation_matrix",
@@ -27,7 +29,55 @@ __all__ = [
     "expression_long_df",
     "feature_label_column",
     "size_factor_normalised",
+    "_vst_or_log",
 ]
+
+
+def _vst_or_log(
+    adata: AnnData, m: pd.DataFrame, norm_method: str,
+    pseudocount: float = 1.0,
+) -> pd.DataFrame:
+    """Apply log10 + pseudocount or VST to a ``genes × cells`` DataFrame.
+
+    Parameters
+    ----------
+    adata : AnnData
+    m : pandas.DataFrame
+        ``genes × cells`` matrix (matches the R heatmap convention; the
+        helper transposes internally for ``vst_exprs`` which wants
+        ``cells × genes``).
+    norm_method : {"log", "vstExprs"}
+    pseudocount : float, default 1.0
+        Added before ``log10``. Matches R's hardcoded ``pseudocount <- 1``
+        in the heatmap sibling functions (``plotting.R:1145, 2446``).
+
+    Raises
+    ------
+    ValueError
+        ``norm_method`` is neither ``"log"`` nor ``"vstExprs"``.
+    RuntimeError
+        ``norm_method == "vstExprs"`` but no ``"blind"`` dispersion fit
+        is registered. R's heatmap code silently skips the vstExprs
+        branch when ``disp_func`` is NULL (``plotting.R:1162``), leaving
+        the matrix raw; this port raises loudly per the project's
+        meta-principle so callers learn to call ``estimate_dispersions``
+        rather than receive a silently-wrong plot.
+    """
+    if norm_method == "vstExprs":
+        info = get_disp_fit_info(adata, "blind")
+        if info is None or info.get("disp_func") is None:
+            raise RuntimeError(
+                "norm_method='vstExprs' requires a prior "
+                "estimate_dispersions(adata) call. Either run "
+                "estimate_dispersions first or use norm_method='log'."
+            )
+        arr = vst_exprs(adata, expr_matrix=m.to_numpy().T).T
+        return pd.DataFrame(arr, index=m.index, columns=m.columns)
+    if norm_method == "log":
+        return np.log10(m + pseudocount)
+    raise ValueError(
+        f"norm_method must be 'log' or 'vstExprs'; got {norm_method!r}"
+    )
 
 
 def rotation_matrix(theta_deg: float) -> np.ndarray:
