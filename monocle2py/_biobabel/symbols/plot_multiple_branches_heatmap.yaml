@@ -1,0 +1,108 @@
+id: monocle2py.plot_multiple_branches_heatmap
+import_path: monocle2py.plot_multiple_branches_heatmap
+kind: function
+signature: plot_multiple_branches_heatmap(cds, branches, branches_name=None, cluster_rows=True, hclust_method='ward.D2', num_clusters=6, hmcols=None, add_annotation_row=None, add_annotation_col=None, show_rownames=False, use_gene_short_name=True, norm_method='vstExprs', scale_max=3.0, scale_min=-3.0, trend_formula='~sm.ns(Pseudotime, df=3)', return_heatmap=False, cores=1)
+purpose: multi-branch pseudotime heatmap; compare gene expression along three or more terminal branches
+description: 'Port of R''s ``plot_multiple_branches_heatmap``. For each terminal
+
+  ``branches`` State, walks the centroid MST from the root to that
+
+  branch''s tip, smooths every gene''s expression along the path on a
+
+  100-point pseudotime grid, then stitches the per-branch matrices
+
+  side-by-side with column gaps. Renders a ``pheatmap`` with Branch +
+
+  Cluster annotations.
+
+  '
+parameters:
+- name: cds
+  type: AnnData
+  required: true
+- name: branches
+  type: Sequence[int]
+  required: true
+  description: Terminal State values, one per branch.
+- name: branches_name
+  type: Sequence[str] | None
+  required: false
+  default: null
+- name: cluster_rows
+  type: bool
+  required: false
+  default: true
+- name: hclust_method
+  type: str
+  required: false
+  default: ward.D2
+- name: num_clusters
+  type: int
+  required: false
+  default: 6
+- name: hmcols
+  type: Sequence[str] | None
+  required: false
+  default: null
+- name: add_annotation_row
+  type: pd.DataFrame | None
+  required: false
+  default: null
+- name: add_annotation_col
+  type: pd.DataFrame | None
+  required: false
+  default: null
+- name: show_rownames
+  type: bool
+  required: false
+  default: false
+- name: use_gene_short_name
+  type: bool
+  required: false
+  default: true
+- name: norm_method
+  type: str
+  required: false
+  default: vstExprs
+  description: Default 'vstExprs' requires estimate_dispersions. Use 'log' if not run.
+- name: scale_max
+  type: float
+  required: false
+  default: 3.0
+- name: scale_min
+  type: float
+  required: false
+  default: -3.0
+- name: trend_formula
+  type: str
+  required: false
+  default: ~sm.ns(Pseudotime, df=3)
+- name: return_heatmap
+  type: bool
+  required: false
+  default: false
+- name: cores
+  type: int
+  required: false
+  default: 1
+mutates: execution_class=plot; no declared in-place mutation; returns_kind=plot
+returns: pheatmap; kind=plot
+requires:
+- adata.obs.Pseudotime
+- adata.obs.State
+- adata.uns.monocle2.ddrtree
+writes: []
+examples:
+- monocle2py.plot_multiple_branches_heatmap(adata[:, gene_ids], branches=[2, 3, 4])
+failure_fixes:
+- when: 'RuntimeError: Branch K is not a State value in the trajectory'
+  suggest:
+  - Pick states from adata.obs['State'].astype(int).unique().
+- when: 'ValueError: branches_name should have the same length as branches'
+  suggest:
+  - Match the length, or pass branches_name=None to use the raw state numbers.
+- when: 'RuntimeError: No cells on any of the requested branches'
+  suggest:
+  - Confirm each State has cells reachable from the trajectory root.
+related:
+- 'tested_on: monocle2py@2.9.0'

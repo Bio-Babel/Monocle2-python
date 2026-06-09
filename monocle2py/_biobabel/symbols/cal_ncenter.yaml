@@ -1,0 +1,31 @@
+id: monocle2py.cal_ncenter
+import_path: monocle2py.cal_ncenter
+kind: function
+signature: cal_ncenter(n_cells, n_cells_limit=100)
+purpose: compute the default DDRTree centroid count
+description: 'Port of R''s ``cal_ncenter``. Returns ``round(2 * n_cells_limit *
+
+  log(n_cells) / (log(n_cells) + log(n_cells_limit)))``. Used by
+
+  :func:`reduce_dimension` when ``auto_param_selection=True`` and
+
+  ``n_cells >= 100`` to choose the DDRTree ``ncenter`` argument.
+
+  '
+parameters:
+- name: n_cells
+  type: int
+  required: true
+- name: n_cells_limit
+  type: int
+  required: false
+  default: 100
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: int; kind=value
+requires: []
+writes: []
+examples:
+- k = monocle2py.cal_ncenter(adata.n_obs)
+failure_fixes: []
+related:
+- 'tested_on: monocle2py@2.9.0'

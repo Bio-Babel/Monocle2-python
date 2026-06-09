@@ -1,0 +1,47 @@
+id: monocle2py.plot_rho_delta
+import_path: monocle2py.plot_rho_delta
+kind: function
+signature: plot_rho_delta(adata, rho_threshold=None, delta_threshold=None)
+purpose: decision plot for density-peak clustering; pick rho/delta thresholds visually
+description: 'Port of R''s ``plot_rho_delta``. Scatter of local density rho vs.
+
+  distance-to-higher-density-point delta from
+
+  :func:`cluster_cells`. Peaks are coloured black, non-peaks grey.
+
+  Supplying ``rho_threshold`` and ``delta_threshold`` recomputes the
+
+  peak mask on the fly so users can iterate on cutoffs without rerunning
+
+  ``cluster_cells``.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: rho_threshold
+  type: float | None
+  required: false
+  default: null
+- name: delta_threshold
+  type: float | None
+  required: false
+  default: null
+mutates: execution_class=plot; no declared in-place mutation; returns_kind=plot
+returns: GGPlot; kind=plot
+requires:
+- adata.obs.rho
+- adata.obs.delta
+- adata.obs.peaks
+writes: []
+examples:
+- monocle2py.plot_rho_delta(adata)
+- monocle2py.plot_rho_delta(adata, rho_threshold=5, delta_threshold=3)
+failure_fixes:
+- when: 'RuntimeError: Run cluster_cells before plot_rho_delta'
+  suggest:
+  - monocle2py.cluster_cells
+related:
+- monocle2py.cluster_cells
+- 'tested_on: monocle2py@2.9.0'

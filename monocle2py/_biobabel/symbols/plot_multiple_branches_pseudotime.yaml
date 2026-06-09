@@ -1,0 +1,98 @@
+id: monocle2py.plot_multiple_branches_pseudotime
+import_path: monocle2py.plot_multiple_branches_pseudotime
+kind: function
+signature: plot_multiple_branches_pseudotime(adata, branches, branches_name=None, min_expr=None, cell_size=0.75, norm_method='raw', nrow=None, ncol=1, panel_order=None, color_by='Branch', label_by_short_name=True, TPM=False, cores=1)
+purpose: per-gene LOWESS curves along multiple branches; branch-aligned trajectory plot for 3+ child branches
+description: 'Port of R''s ``plot_multiple_branches_pseudotime``. For each requested
+
+  terminal State in ``branches``, walks from the trajectory root to
+
+  that branch''s tip and smooths every gene''s expression along the path
+
+  with LOWESS. All branches share a common rescaled [0, 100] pseudotime
+
+  axis. Returns a faceted ``ggplot2_py.GGPlot``.
+
+
+  ``norm_method`` (``''raw''`` default / ``''log''`` / ``''vstExprs''``) is
+
+  applied to the LOWESS-smoothed values before plotting; ``''raw''``
+
+  reproduces R''s observable output (R''s own norm_method branch is dead
+
+  at plotting.R:2714-2715). ``''vstExprs''`` needs a prior
+
+  ``estimate_dispersions`` call.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: branches
+  type: Sequence[int]
+  required: true
+- name: branches_name
+  type: Sequence[str] | None
+  required: false
+  default: null
+- name: min_expr
+  type: float | None
+  required: false
+  default: null
+- name: cell_size
+  type: float
+  required: false
+  default: 0.75
+- name: norm_method
+  type: str
+  required: false
+  default: raw
+  description: '''raw'' (R-faithful default), ''log'', or ''vstExprs''. Applied to smoothed values; ''vstExprs'' needs estimate_dispersions first.'
+- name: nrow
+  type: int | None
+  required: false
+  default: null
+- name: ncol
+  type: int
+  required: false
+  default: 1
+- name: panel_order
+  type: Sequence[str] | None
+  required: false
+  default: null
+- name: color_by
+  type: str
+  required: false
+  default: Branch
+- name: label_by_short_name
+  type: bool
+  required: false
+  default: true
+- name: TPM
+  type: bool
+  required: false
+  default: false
+  description: If True, normalise X to per-cell TPM before smoothing.
+- name: cores
+  type: int
+  required: false
+  default: 1
+mutates: execution_class=plot; no declared in-place mutation; returns_kind=plot
+returns: GGPlot; kind=plot
+requires:
+- adata.obs.Pseudotime
+- adata.obs.State
+- adata.uns.monocle2.ddrtree
+writes: []
+examples:
+- monocle2py.plot_multiple_branches_pseudotime(adata[:, marker_ids], branches=[2, 3])
+failure_fixes:
+- when: 'RuntimeError: Run order_cells before plot_multiple_branches_pseudotime'
+  suggest:
+  - monocle2py.order_cells
+- when: 'RuntimeError: Branch K is not a State value'
+  suggest:
+  - Inspect adata.obs['State'].astype(int).unique() and pick terminal states from there.
+related:
+- 'tested_on: monocle2py@2.9.0'

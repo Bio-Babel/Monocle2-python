@@ -1,0 +1,40 @@
+id: monocle2py.normalize_expr_data
+import_path: monocle2py.normalize_expr_data
+kind: function
+signature: normalize_expr_data(adata, norm_method='log', pseudo_expr=1.0, relative_expr=True)
+purpose: family-aware normalisation matching reduce_dimension's pre-DDRTree step
+description: "Port of R's ``normalize_expr_data``. Returns a genes x cells dense\nmatrix normalised per the expression family:\n\n  * NB / NB.size: divide by Size_Factor (when ``relative_expr=True``),\n    add ``pseudo_expr``, apply ``log2`` (``\"log\"``) or VST\n    (``\"vstExprs\"``) or just ``+pseudo_expr`` (``\"none\"``).\n  * Tobit: ``+pseudo_expr`` and log2 (``\"log\"``) or raw (``\"none\"``).\n  * Gaussian: ``+pseudo_expr``, ``\"none\"`` only.\n\nSubsets to ``var['use_for_ordering']`` when set. Mostly an internal\nhelper — call ``reduce_dimension`` instead unless you need the\nnormalised matrix directly.\n"
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: norm_method
+  type: str
+  required: false
+  default: log
+  description: '''log'', ''vstExprs'', or ''none''.'
+- name: pseudo_expr
+  type: float
+  required: false
+  default: 1.0
+- name: relative_expr
+  type: bool
+  required: false
+  default: true
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: np.ndarray; kind=value
+requires:
+- adata.obs.Size_Factor
+- adata.uns.monocle2.expression_family
+writes: []
+examples:
+- fm = monocle2py.normalize_expr_data(adata)
+failure_fixes:
+- when: 'RuntimeError: You must call estimate_size_factors before reduce_dimension'
+  suggest:
+  - monocle2py.estimate_size_factors
+- when: 'ValueError: Unknown norm_method'
+  suggest:
+  - Pass one of 'log', 'vstExprs', 'none'.
+related:
+- 'tested_on: monocle2py@2.9.0'

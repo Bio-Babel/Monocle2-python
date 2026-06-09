@@ -1,0 +1,87 @@
+id: monocle2py.branch_test
+import_path: monocle2py.branch_test
+kind: function
+signature: branch_test(adata, full_model_formula_str='~sm.ns(Pseudotime, df=3)*Branch', reduced_model_formula_str='~sm.ns(Pseudotime, df=3)', branch_states=None, branch_point=1, branch_labels=None, progenitor_method='sequential_split', stretch=True, relative_expr=True, cores=1, verbose=False)
+purpose: internal branch LRT used by beam(); expose the branch-test result without the gene_short_name join
+description: 'Port of R''s ``branchTest``. Builds a branch CDS via
+
+  :func:`build_branch_cell_dataset` and runs
+
+  :func:`differential_gene_test` on it with the branch interaction full
+
+  model and the no-interaction reduced model. Returns the raw
+
+  ``differential_gene_test`` output (DataFrame). ``beam`` is a thin
+
+  wrapper that additionally joins per-gene var columns.
+
+
+  If ``"Branch"`` is not in the full formula, this short-circuits and
+
+  runs the LRT directly on the input AnnData without duplication.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: full_model_formula_str
+  type: str
+  required: false
+  default: ~sm.ns(Pseudotime, df=3)*Branch
+- name: reduced_model_formula_str
+  type: str
+  required: false
+  default: ~sm.ns(Pseudotime, df=3)
+- name: branch_states
+  type: Sequence[int] | None
+  required: false
+  default: null
+- name: branch_point
+  type: int
+  required: false
+  default: 1
+- name: branch_labels
+  type: Sequence[str] | None
+  required: false
+  default: null
+- name: progenitor_method
+  type: str
+  required: false
+  default: sequential_split
+- name: stretch
+  type: bool
+  required: false
+  default: true
+- name: relative_expr
+  type: bool
+  required: false
+  default: true
+- name: cores
+  type: int
+  required: false
+  default: 1
+- name: verbose
+  type: bool
+  required: false
+  default: false
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: pd.DataFrame; kind=value
+requires:
+- adata.obs.Pseudotime
+- adata.obs.State
+- adata.obs.Size_Factor
+- adata.uns.monocle2.ddrtree
+- adata.uns.monocle2.aux_ordering
+writes: []
+examples:
+- res = monocle2py.branch_test(adata, branch_point=1)
+failure_fixes:
+- when: 'RuntimeError: Please first order the cells in pseudotime'
+  suggest:
+  - monocle2py.order_cells
+- when: Branch term not in formula
+  suggest:
+  - Prefer monocle2py.beam for branch-aware tests — the default formula already includes Branch.
+related:
+- 'tested_on: monocle2py@2.9.0'

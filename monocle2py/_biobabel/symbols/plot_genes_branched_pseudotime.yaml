@@ -1,0 +1,97 @@
+id: monocle2py.plot_genes_branched_pseudotime
+import_path: monocle2py.plot_genes_branched_pseudotime
+kind: function
+signature: plot_genes_branched_pseudotime(cds, branch_states=None, branch_point=1, branch_labels=None, method='fitting', min_expr=None, cell_size=0.75, nrow=None, ncol=1, panel_order=None, color_by='State', expression_curve_linetype_by='Branch', trend_formula='~sm.ns(Pseudotime, df=3) * Branch', reduced_model_formula_str=None, label_by_short_name=True, relative_expr=True)
+purpose: per-gene curves split by branch; visualise BEAM hits across a branch point with two trend lines
+description: 'Port of R''s ``plot_genes_branched_pseudotime``. Builds a branch-aware
+
+  AnnData via :func:`build_branch_cell_dataset` (when ``"Branch"`` is in
+
+  ``trend_formula``), fits the per-branch trend, and overlays expression
+
+  points with branch-typed line curves. Returns a faceted
+
+  ``ggplot2_py.GGPlot``.
+
+  '
+parameters:
+- name: cds
+  type: AnnData
+  required: true
+- name: branch_states
+  type: Iterable[int] | None
+  required: false
+  default: null
+- name: branch_point
+  type: int
+  required: false
+  default: 1
+- name: branch_labels
+  type: Sequence[str] | None
+  required: false
+  default: null
+- name: method
+  type: str
+  required: false
+  default: fitting
+  description: '''fitting'' or ''loess''. ''fitting'' uses gen_smooth_curves.'
+- name: min_expr
+  type: float | None
+  required: false
+  default: null
+- name: cell_size
+  type: float
+  required: false
+  default: 0.75
+- name: nrow
+  type: int | None
+  required: false
+  default: null
+- name: ncol
+  type: int
+  required: false
+  default: 1
+- name: panel_order
+  type: Sequence[str] | None
+  required: false
+  default: null
+- name: color_by
+  type: str | None
+  required: false
+  default: State
+- name: expression_curve_linetype_by
+  type: str
+  required: false
+  default: Branch
+- name: trend_formula
+  type: str
+  required: false
+  default: ~sm.ns(Pseudotime, df=3) * Branch
+- name: reduced_model_formula_str
+  type: str | None
+  required: false
+  default: null
+- name: label_by_short_name
+  type: bool
+  required: false
+  default: true
+- name: relative_expr
+  type: bool
+  required: false
+  default: true
+mutates: execution_class=plot; no declared in-place mutation; returns_kind=plot
+returns: GGPlot; kind=plot
+requires:
+- adata.obs.Pseudotime
+- adata.obs.State
+- adata.uns.monocle2.ddrtree
+- adata.uns.monocle2.aux_ordering
+writes: []
+examples:
+- monocle2py.plot_genes_branched_pseudotime(adata[:, marker_ids], branch_point=1)
+failure_fixes:
+- when: 'RuntimeError: Please first order the cells in pseudotime'
+  suggest:
+  - monocle2py.order_cells
+related:
+- 'tested_on: monocle2py@2.9.0'

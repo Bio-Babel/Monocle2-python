@@ -1,0 +1,48 @@
+id: monocle2py.set_ordering_filter
+import_path: monocle2py.set_ordering_filter
+kind: function
+signature: set_ordering_filter(adata, ordering_genes)
+purpose: select the variable-gene panel for trajectory ordering; restrict reduce_dimension to a curated gene list
+description: 'Port of R''s ``setOrderingFilter``. Flips a boolean
+
+  ``var[''use_for_ordering'']`` mask True for genes whose names appear in
+
+  ``ordering_genes``. ``reduce_dimension`` (and ``normalize_expr_data``)
+
+  subset the expression matrix to these genes before running DDRTree.
+
+  Skipping this step (or leaving the mask all-False) makes
+
+  ``reduce_dimension`` operate on **every gene**, which usually produces
+
+  a noisy trajectory — call this with the ~500-2000 top differentially-
+
+  expressed genes from a ``~Cluster`` test (see the HSMM tutorial) or a
+
+  pseudotime-test gene list.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: ordering_genes
+  type: Iterable[str]
+  required: true
+  description: Gene names matched against adata.var_names.
+mutates: execution_class=adata_mutation; mutates input object in place; returns_kind=same_object
+returns: AnnData; kind=same_object
+requires:
+- adata.uns.monocle2
+writes:
+- adata.var.use_for_ordering
+examples:
+- monocle2py.set_ordering_filter(adata, ordering_genes)
+failure_fixes:
+- when: all-False mask after the call
+  suggest:
+  - Confirm your gene IDs match adata.var_names exactly (case + Ensembl vs symbol).
+  - If your IDs are gene symbols, translate via adata.var['gene_short_name'] before calling.
+related:
+- monocle2py.reduce_dimension
+- 'tested_on: monocle2py@2.9.0'

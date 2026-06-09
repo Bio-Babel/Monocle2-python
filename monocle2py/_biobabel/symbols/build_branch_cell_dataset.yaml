@@ -1,0 +1,76 @@
+id: monocle2py.build_branch_cell_dataset
+import_path: monocle2py.build_branch_cell_dataset
+kind: function
+signature: build_branch_cell_dataset(adata, progenitor_method='sequential_split', branch_states=None, branch_point=1, branch_labels=None, stretch=True)
+purpose: build a 2-branch AnnData for BEAM / branched plots; duplicate or alternately-split progenitor cells across branches
+description: 'Port of R''s ``buildBranchCellDataSet``. Walks the centroid MST from
+
+  the root to two leaf states (either explicit ``branch_states`` or the
+
+  two child paths of ``branch_point``), then materialises a new
+
+  AnnData where each cell is tagged with a ``Branch`` categorical
+
+  column. Progenitor cells (cells on the shared path to the root) are
+
+  either duplicated across both branches (``"duplicate"``) or split
+
+  alternately by pseudotime (``"sequential_split"``, R''s default).
+
+
+  When ``stretch=True``, pseudotime is rescaled so both branches span
+
+  ``[0, 100]`` — required for the heatmap plotters.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: progenitor_method
+  type: str
+  required: false
+  default: sequential_split
+  description: '''sequential_split'' (R default) or ''duplicate''.'
+- name: branch_states
+  type: Sequence[int] | None
+  required: false
+  default: null
+- name: branch_point
+  type: int
+  required: false
+  default: 1
+- name: branch_labels
+  type: Sequence[str] | None
+  required: false
+  default: null
+- name: stretch
+  type: bool
+  required: false
+  default: true
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=new_object
+returns: AnnData; kind=new_object
+requires:
+- adata.obs.Pseudotime
+- adata.obs.State
+- adata.uns.monocle2.ddrtree
+- adata.uns.monocle2.aux_ordering
+writes: []
+examples:
+- branch_cds = monocle2py.build_branch_cell_dataset(adata, branch_point=1)
+- branch_cds = monocle2py.build_branch_cell_dataset(adata, branch_states=[2, 3], progenitor_method='duplicate')
+failure_fixes:
+- when: 'ValueError: progenitor_method must be ''duplicate'' or ''sequential_split'''
+  suggest:
+  - Pass one of the two literal strings.
+- when: 'RuntimeError: Expected 2 branches, got N'
+  suggest:
+  - Only 2-branch builds are supported. Choose branch_states explicitly to nail down the pair.
+- when: 'RuntimeError: common ancestors between selected State values on path to root State'
+  suggest:
+  - The two branch_states share no pre-branch ancestor. Pick states descending from a common branch point.
+related:
+- monocle2py.branch_test
+- monocle2py.beam
+- monocle2py.plot_genes_branched_heatmap
+- 'tested_on: monocle2py@2.9.0'

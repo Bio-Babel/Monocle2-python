@@ -1,0 +1,104 @@
+id: monocle2py.reduce_dimension
+import_path: monocle2py.reduce_dimension
+kind: function
+signature: reduce_dimension(adata, max_components=2, reduction_method='DDRTree', norm_method='log', residual_model_formula_str=None, pseudo_expr=1.0, relative_expr=True, auto_param_selection=True, verbose=False, scaling=True, num_dim=50, random_state=2016, backend='numpy', kwargs=None)
+purpose: DDRTree principal-graph trajectory inference; tSNE pre-projection for density-peak clustering
+description: "Port of R's ``reduceDimension``. Two branches:\n\n  * ``reduction_method=\"DDRTree\"`` (default) — fits a DDRTree\n    principal graph and writes the cell embedding to\n    ``obsm['X_dr']`` plus centroid state to\n    ``uns['monocle2']['ddrtree']`` (``K``, ``W``, ``mst_edges``,\n    ``mst_weights``, ``closest_vertex``, ``objective_vals``,\n    ``gene_mask``). Required prerequisite for ``order_cells``.\n  * ``reduction_method=\"tSNE\"`` — PCA pre-projection then sklearn\n    TSNE. Used upstream of density-peak ``cluster_cells``.\n\nNormalisation flow: ``normalize_expr_data`` (family-aware)\n→ drop zero-SD genes → optional ``residual_model_formula_str`` batch\nregression (R's limma::lmFit OLS) → optional per-gene z-score (``scaling``)\n→ drop non-finite rows. Subsets to ``var['use_for_ordering']`` when\nset, so call ``set_ordering_filter`` first.\n"
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: max_components
+  type: int
+  required: false
+  default: 2
+- name: reduction_method
+  type: str
+  required: false
+  default: DDRTree
+  description: '''DDRTree'' or ''tSNE''. ICA is not ported.'
+- name: norm_method
+  type: str
+  required: false
+  default: log
+  description: '''log'', ''vstExprs'', or ''none''. vstExprs requires estimate_dispersions.'
+- name: residual_model_formula_str
+  type: str | None
+  required: false
+  default: null
+  description: R-style formula on obs columns; non-intercept effects are regressed out.
+- name: pseudo_expr
+  type: float
+  required: false
+  default: 1.0
+- name: relative_expr
+  type: bool
+  required: false
+  default: true
+  description: For NB families, divide counts by Size_Factor before normalising.
+- name: auto_param_selection
+  type: bool
+  required: false
+  default: true
+  description: If True and n_cells >= 100, ncenter = cal_ncenter(n_cells).
+- name: verbose
+  type: bool
+  required: false
+  default: false
+- name: scaling
+  type: bool
+  required: false
+  default: true
+- name: num_dim
+  type: int
+  required: false
+  default: 50
+  description: PCA components upstream of TSNE only.
+- name: random_state
+  type: int
+  required: false
+  default: 2016
+  description: Matches R set.seed(2016).
+- name: backend
+  type: str
+  required: false
+  default: numpy
+  description: Forwarded to ddrtree.DDRTree. 'numpy' is the R-faithful reference.
+- name: kwargs
+  type: Any
+  required: false
+  description: 'Extra args. DDRTree: ncenter, initial_method, maxIter, sigma, lambda/lambda_, param.gamma/gamma, tol, device, dtype, mst_algorithm. tSNE: any sklearn TSNE kwarg.'
+mutates: execution_class=adata_mutation; mutates input object in place; returns_kind=same_object
+returns: AnnData; kind=same_object
+requires:
+- adata.obs.Size_Factor
+- adata.var.use_for_ordering
+- adata.uns.monocle2
+writes:
+- adata.obsm.X_dr
+- adata.uns.monocle2
+examples:
+- monocle2py.reduce_dimension(adata, reduction_method='DDRTree')
+- monocle2py.reduce_dimension(adata, reduction_method='tSNE', num_dim=3, perplexity=10)
+failure_fixes:
+- when: 'RuntimeError: You must call estimate_size_factors before reduce_dimension'
+  suggest:
+  - monocle2py.estimate_size_factors
+- when: 'ValueError: Unsupported reduction_method'
+  suggest:
+  - Only 'DDRTree' and 'tSNE' are ported. ICA from R is not implemented.
+- when: 'ValueError: Unsupported expression family'
+  suggest:
+  - 'Supported vfamily values: negbinomial, negbinomial.size, Tobit, uninormal (gaussian_family), binomialff.'
+- when: 'RuntimeError: All genes have standard deviation zero'
+  suggest:
+  - Your var['use_for_ordering'] mask is too restrictive (or constant across cells).
+  - Re-run set_ordering_filter with a broader gene list.
+- when: Trajectory looks linear / no branches
+  suggest:
+  - Your ordering genes may not capture branch-defining variation. Try cluster-DEG ordering genes (~Cluster from tSNE → density-peak).
+  - Confirm var['use_for_ordering'] has >100 genes and includes known marker genes.
+related:
+- monocle2py.order_cells
+- monocle2py.cluster_cells
+- 'tested_on: monocle2py@2.9.0'

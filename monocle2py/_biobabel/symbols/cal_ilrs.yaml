@@ -1,0 +1,106 @@
+id: monocle2py.cal_ilrs
+import_path: monocle2py.cal_ilrs
+kind: function
+signature: cal_ilrs(adata, trend_formula='~sm.ns(Pseudotime, df=3)*Branch', branch_point=1, trajectory_states=None, relative_expr=True, stretch=True, cores=1, ILRs_limit=3.0, label_by_short_name=True, useVST=False, round_exprs=False, output_type='all', branch_labels=None, n_points=100, return_all=False, verbose=False)
+purpose: instantaneous log-ratio between two branches; per-gene divergence curve along stretched pseudotime
+description: 'Port of R''s ``calILRs``. Builds a duplicated-progenitor branch CDS,
+
+  fits the trend formula per gene, evaluates on an ``n_points``
+
+  pseudotime grid for each branch, and returns
+
+  ``log2((A+1)/(B+1))`` (or the VST-stabilised difference) clipped to
+
+  ``[-ILRs_limit, ILRs_limit]``. With ``return_all=True``, additional
+
+  matrices (norm divergence, raw divergence, per-branch expression
+
+  curves) are returned in a dict.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: trend_formula
+  type: str
+  required: false
+  default: ~sm.ns(Pseudotime, df=3)*Branch
+- name: branch_point
+  type: int
+  required: false
+  default: 1
+- name: trajectory_states
+  type: Sequence[int] | None
+  required: false
+  default: null
+  description: Exactly two states. Overrides branch_point.
+- name: relative_expr
+  type: bool
+  required: false
+  default: true
+- name: stretch
+  type: bool
+  required: false
+  default: true
+- name: cores
+  type: int
+  required: false
+  default: 1
+- name: ILRs_limit
+  type: float
+  required: false
+  default: 3.0
+- name: label_by_short_name
+  type: bool
+  required: false
+  default: true
+- name: useVST
+  type: bool
+  required: false
+  default: false
+- name: round_exprs
+  type: bool
+  required: false
+  default: false
+- name: output_type
+  type: str
+  required: false
+  default: all
+  description: '''all'' or ''after_bifurcation'' (trim to pseudotime >= bifurcation).'
+- name: branch_labels
+  type: Sequence[str] | None
+  required: false
+  default: null
+- name: n_points
+  type: int
+  required: false
+  default: 100
+- name: return_all
+  type: bool
+  required: false
+  default: false
+- name: verbose
+  type: bool
+  required: false
+  default: false
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: pd.DataFrame | dict[str, pd.DataFrame]; kind=value
+requires:
+- adata.obs.Pseudotime
+- adata.obs.State
+- adata.uns.monocle2.ddrtree
+- adata.uns.monocle2.aux_ordering
+writes: []
+examples:
+- ilrs = monocle2py.cal_ilrs(adata, branch_point=1)
+- raw = monocle2py.cal_ilrs(adata, branch_point=1, return_all=True)
+failure_fixes:
+- when: 'ValueError: cal_ilrs only supports the calculation of ILRs between TWO branches'
+  suggest:
+  - trajectory_states must have length 2.
+- when: 'RuntimeError: Expected two branches after subset'
+  suggest:
+  - build_branch_cell_dataset failed to find two branches; pick branch_states explicitly.
+related:
+- 'tested_on: monocle2py@2.9.0'

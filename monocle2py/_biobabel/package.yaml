@@ -1,0 +1,61 @@
+schema_version: 1
+repo: https://github.com/Bio-Babel/Monocle2-python
+distribution: monocle2-python
+import_name: monocle2py
+display_name: monocle2py — single-cell DDRTree trajectory + BEAM branch analysis (R Monocle2 port)
+contract_class: analysis
+tier: 2
+maturity: beta
+r_package:
+  package: monocle
+  repo: https://github.com/cole-trapnell-lab/monocle-release
+  version_or_commit: 2.9.0 @ 7df1050
+  fidelity: partial
+capabilities:
+- trajectory-inference
+- pseudotime
+- DDRTree
+- branch-analysis
+- BEAM
+- differential-expression
+- density-peak-clustering
+- census-normalization
+domain_tags:
+- single-cell
+- scRNA-seq
+- bioinformatics
+task_tags:
+- pseudotime-trajectory
+- lineage-analysis
+- branch-point-detection
+- DE-along-pseudotime
+- branch-dependent-expression
+- cluster-cells
+- relative-to-absolute-counts
+foundation: []
+triggers:
+- Monocle2 pipeline on AnnData
+- DDRTree pseudotime trajectory
+- BEAM branch-dependent expression
+- branched single-cell trajectory
+- Census FPKM-to-transcript count conversion
+- density peak clustering of cells
+- plot_genes_branched_heatmap
+not_when:
+- RNA velocity needed (use scvelo) — Monocle2 has no splicing model
+- principal-graph trajectories with partitions (use monocle3 instead — Monocle2's DDRTree forces a single tree)
+- Leiden/Louvain communities required — Monocle2 only ports density-peak clustering
+templates:
+- id: monocle2py.basic_trajectory
+  path: templates/basic_trajectory.py
+  task_tags:
+  - pseudotime-trajectory
+  - pseudotime
+  - trajectory
+  - branch
+  description: Canonical DDRTree pipeline on the HSMM tutorial bundle, ending in a branched plot_cell_trajectory.
+  parameters: []
+  code_template: ''
+  expected_artifacts:
+  - mutated AnnData with obs.Pseudotime, obs.State, obs.Parent
+  notes: []

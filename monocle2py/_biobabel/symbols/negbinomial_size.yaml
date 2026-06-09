@@ -1,0 +1,33 @@
+id: monocle2py.negbinomial_size
+import_path: monocle2py.negbinomial_size
+kind: function
+signature: negbinomial_size(size=inf)
+purpose: build a fixed-size NB expression family
+description: 'Construct a ``NegbinomialSize`` family (VGAM ``negbinomial.size``).
+
+  Default ``size=inf`` matches R''s ``VGAM::negbinomial.size()`` and
+
+  degenerates to Poisson. Monocle2''s ``fit_model_helper`` overrides
+
+  this per-gene with ``size = 1 / disp_func(mean(x))`` when a
+
+  dispersion fit is available. **This is the default family** for
+
+  ``new_cell_dataset``.
+
+  '
+parameters:
+- name: size
+  type: float
+  required: false
+  default: .inf
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: NegbinomialSize; kind=value
+requires: []
+writes: []
+examples:
+- fam = monocle2py.negbinomial_size()
+failure_fixes: []
+related:
+- monocle2py.new_cell_dataset
+- 'tested_on: monocle2py@2.9.0'

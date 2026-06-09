@@ -1,0 +1,96 @@
+id: monocle2py.basic_trajectory
+title: Basic Trajectory
+description: 'Canonical 9-step Monocle2 DDRTree pipeline on an AnnData with raw
+
+  counts: new_cell_dataset → detect_genes → estimate_size_factors →
+
+  estimate_dispersions → set_ordering_filter → reduce_dimension(DDRTree)
+
+  → order_cells → differential_gene_test(~sm.ns(Pseudotime, df=3)) →
+
+  plot_cell_trajectory. Each step''s ``requires`` is satisfied by the
+
+  previous step''s ``writes``; agents should inspect the step notes and
+
+  `biobabel.describe_symbol` output before writing or running code.
+
+  '
+task_tags:
+- DDRTree pseudotime trajectory
+- Monocle2 standard analysis
+- single-cell trajectory inference
+- pseudotime
+- trajectory
+when_to_use:
+- DDRTree pseudotime trajectory
+- Monocle2 standard analysis
+- single-cell trajectory inference
+when_not_to_use: []
+inputs:
+- name: ''
+  kind: AnnData
+  description: Cells x genes with raw (integer-like) counts in X.
+  requirements: []
+steps:
+- symbol: monocle2py.new_cell_dataset
+  purpose: Initialise Monocle2 state. Defaults to negbinomial_size. (uns.monocle2 carries expression_family + lower_detection_limit nested slots.)
+  args: {}
+  notes:
+  - 'writes: uns.monocle2, obs.Size_Factor'
+- symbol: monocle2py.detect_genes
+  purpose: Count detected cells per gene; QC threshold.
+  args:
+    min_expr: 0.1
+  notes:
+  - 'requires: uns.monocle2'
+  - 'writes: var.num_cells_expressed, obs.num_genes_expressed'
+- symbol: monocle2py.estimate_size_factors
+  purpose: Per-cell DESeq1-style size factors.
+  args: {}
+  notes:
+  - 'requires: uns.monocle2'
+  - 'writes: obs.Size_Factor'
+- symbol: monocle2py.estimate_dispersions
+  purpose: Gamma-identity dispersion curve for NB families. (Reads uns.monocle2.expression_family; writes the nested uns.monocle2.disp_fit_info slot.)
+  args: {}
+  notes:
+  - 'requires: uns.monocle2, obs.Size_Factor'
+  - 'writes: uns.monocle2'
+- symbol: monocle2py.set_ordering_filter
+  purpose: Flag the ordering-gene panel for DDRTree.
+  args:
+    ordering_genes: <list of variable genes, e.g. top 1000 qval from ~Cluster DEG>
+  notes:
+  - 'requires: uns.monocle2, var.num_cells_expressed'
+  - 'writes: var.use_for_ordering'
+- symbol: monocle2py.reduce_dimension
+  purpose: DDRTree principal graph + cell embedding. (Reads uns.monocle2.expression_family; writes nested uns.monocle2.ddrtree + dim_reduce_type; obsm.X_dr is the satisfiable 'DDRTree ran' marker.)
+  args:
+    max_components: 2
+    reduction_method: DDRTree
+  notes:
+  - 'requires: var.use_for_ordering, obs.Size_Factor, uns.monocle2'
+  - 'writes: obsm.X_dr, uns.monocle2'
+- symbol: monocle2py.order_cells
+  purpose: Pseudotime + State labels via cell-level MST. Call again with root_state=k to re-anchor pseudotime; State is not renumbered. (Reads nested uns.monocle2.ddrtree + dim_reduce_type via obsm.X_dr marker; writes nested uns.monocle2.aux_ordering.)
+  args: {}
+  notes:
+  - 'requires: obsm.X_dr'
+  - 'writes: obs.Pseudotime, obs.State, obs.Parent, uns.monocle2'
+- symbol: monocle2py.differential_gene_test
+  purpose: Per-gene LRT for pseudotime-dependent expression. Returns DataFrame (NOT mutating).
+  args:
+    full_model_formula_str: ~sm.ns(Pseudotime, df=3)
+    reduced_model_formula_str: ~1
+  notes:
+  - 'requires: obs.Pseudotime, obs.Size_Factor'
+- symbol: monocle2py.plot_cell_trajectory
+  purpose: Render the DDRTree trajectory with branch points. (Reads nested uns.monocle2.ddrtree via obsm.X_dr marker.)
+  args:
+    color_by: State
+  notes:
+  - 'requires: obsm.X_dr, obs.State'
+templates: []
+outputs:
+- AnnData - <in-memory> - Mutated AnnData with full DDRTree trajectory state.
+- 'DataFrame - <in-memory> - differential_gene_test output: gene_id index + status, family, pval, qval + var columns.'

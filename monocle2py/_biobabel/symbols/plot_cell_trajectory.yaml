@@ -1,0 +1,119 @@
+id: monocle2py.plot_cell_trajectory
+import_path: monocle2py.plot_cell_trajectory
+kind: function
+signature: plot_cell_trajectory(adata, x=1, y=2, color_by='State', show_tree=True, show_backbone=True, backbone_color='black', markers=None, use_color_gradient=False, markers_linear=False, show_cell_names=False, show_state_number=False, cell_size=1.5, cell_link_size=0.75, cell_name_size=2, state_number_size=2.9, show_branch_points=True, theta=0.0)
+purpose: render the canonical Monocle2 trajectory plot; DDRTree principal graph with cells coloured by State / Pseudotime / Hours
+description: 'Port of R''s ``plot_cell_trajectory``. Renders cells in the DDRTree
+
+  embedding (``obsm[''X_dr'']``) overlaid with the principal-graph
+
+  backbone (centroid MST) and branch-point markers. Colour channel is
+
+  any ``adata.obs`` column — typically ``State``, ``Pseudotime``, or a
+
+  user metadata column like ``CellType`` / ``Hours``. Returns a
+
+  ``ggplot2_py.GGPlot``.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: x
+  type: int
+  required: false
+  default: 1
+  description: 1-based component index (R-style).
+- name: y
+  type: int
+  required: false
+  default: 2
+- name: color_by
+  type: str
+  required: false
+  default: State
+- name: show_tree
+  type: bool
+  required: false
+  default: true
+- name: show_backbone
+  type: bool
+  required: false
+  default: true
+- name: backbone_color
+  type: str
+  required: false
+  default: black
+- name: markers
+  type: Sequence[str] | None
+  required: false
+  default: null
+  description: Gene names to overlay; replaces cluster colouring with gene expression.
+- name: use_color_gradient
+  type: bool
+  required: false
+  default: false
+- name: markers_linear
+  type: bool
+  required: false
+  default: false
+- name: show_cell_names
+  type: bool
+  required: false
+  default: false
+- name: show_state_number
+  type: bool
+  required: false
+  default: false
+- name: cell_size
+  type: float
+  required: false
+  default: 1.5
+- name: cell_link_size
+  type: float
+  required: false
+  default: 0.75
+- name: cell_name_size
+  type: float
+  required: false
+  default: 2
+- name: state_number_size
+  type: float
+  required: false
+  default: 2.9
+- name: show_branch_points
+  type: bool
+  required: false
+  default: true
+- name: theta
+  type: float
+  required: false
+  default: 0.0
+  description: Rotate the embedding by theta radians (cosmetic).
+mutates: execution_class=plot; no declared in-place mutation; returns_kind=plot
+returns: GGPlot; kind=plot
+requires:
+- adata.obsm.X_dr
+- adata.obs.State
+writes: []
+examples:
+- monocle2py.plot_cell_trajectory(adata, color_by='State')
+- monocle2py.plot_cell_trajectory(adata, color_by='Pseudotime')
+- monocle2py.plot_cell_trajectory(adata, markers=['MYOG'], use_color_gradient=True)
+failure_fixes:
+- when: 'RuntimeError: Reduced dimensions missing'
+  suggest:
+  - monocle2py.reduce_dimension
+- when: 'RuntimeError: DDRTree state missing'
+  suggest:
+  - Run reduce_dimension with method='DDRTree' (tSNE alone does not produce a principal graph).
+- when: 'ValueError: Reduced space has N components; need at least M'
+  suggest:
+  - Raise max_components in reduce_dimension, or pass x/y indices within the available range.
+- when: color_by column missing
+  suggest:
+  - If color_by='State'/'Pseudotime', run order_cells first.
+  - If color_by='Cluster', run cluster_cells.
+related:
+- 'tested_on: monocle2py@2.9.0'

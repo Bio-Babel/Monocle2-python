@@ -1,0 +1,24 @@
+id: monocle2py.load_paul_cds
+import_path: monocle2py.load_paul_cds
+kind: function
+signature: load_paul_cds()
+purpose: load the pre-fit Paul 2015 hematopoiesis CDS (tutorial V2_4)
+description: 'Load a pre-trained AnnData from tutorial V2_4 (Paul hematopoiesis
+
+  branch demo). Carries the same DDRTree state + Pseudotime / State
+
+  columns as :func:`load_lung_cds`; ready for BEAM and branched plots.
+
+  '
+parameters: []
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: AnnData; kind=value
+requires: []
+writes: []
+examples:
+- paul = monocle2py.load_paul_cds()
+failure_fixes: []
+related:
+- monocle2py.beam
+- monocle2py.plot_genes_branched_heatmap
+- 'tested_on: monocle2py@2.9.0'

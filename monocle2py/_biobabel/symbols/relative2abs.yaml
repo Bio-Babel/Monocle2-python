@@ -1,0 +1,70 @@
+id: monocle2py.relative2abs
+import_path: monocle2py.relative2abs
+kind: function
+signature: relative2abs(relative_cds, t_estimate=None, model_formula_str='~1', expected_capture_rate=0.25, method='num_genes', return_all=False)
+purpose: FPKM / TPM → absolute transcript counts (Census); produce input for negbinomial CellDataSet
+description: 'Port of the ``method="num_genes"`` branch of R''s ``relative2abs``
+
+  (Census algorithm, Qiu 2017). Estimates the abundance ``t`` of one
+
+  transcript copy from each cell''s empirical FPKM/TPM distribution,
+
+  then back-computes a cells x genes matrix of absolute transcript
+
+  counts. The ERCC spike-in path and ``method=''tpm_fraction''`` from R
+
+  are not ported.
+
+
+  Returns a numpy array (default) or a dict with intermediate
+
+  ``t_estimate`` and ``expected_total_mRNAs`` when ``return_all=True``.
+
+  Does NOT mutate the input AnnData.
+
+  '
+parameters:
+- name: relative_cds
+  type: AnnData
+  required: true
+  description: AnnData with FPKM/TPM in X. Build with new_cell_dataset(expression_family=tobit(...)).
+- name: t_estimate
+  type: np.ndarray | None
+  required: false
+  default: null
+  description: Pre-computed t vector; otherwise derived via estimate_t.
+- name: model_formula_str
+  type: str
+  required: false
+  default: ~1
+  description: API parity only; ignored in num_genes path.
+- name: expected_capture_rate
+  type: float
+  required: false
+  default: 0.25
+- name: method
+  type: str
+  required: false
+  default: num_genes
+  description: Only 'num_genes' is ported.
+- name: return_all
+  type: bool
+  required: false
+  default: false
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: np.ndarray | dict[str, Any]; kind=value
+requires: []
+writes: []
+examples:
+- counts = monocle2py.relative2abs(fpkm_cds, method='num_genes')
+- out = monocle2py.relative2abs(fpkm_cds, return_all=True); counts = out['norm_cds']
+failure_fixes:
+- when: 'NotImplementedError: Only method=''num_genes'' is supported'
+  suggest:
+  - ERCC and tpm_fraction branches are not ported. Use num_genes.
+- when: 'ValueError: t_estimate shape (N,) does not match n_cells'
+  suggest:
+  - If supplying t_estimate manually, it must be length n_cells.
+related:
+- monocle2py.new_cell_dataset
+- 'tested_on: monocle2py@2.9.0'

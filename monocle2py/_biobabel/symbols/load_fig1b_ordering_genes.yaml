@@ -1,0 +1,23 @@
+id: monocle2py.load_fig1b_ordering_genes
+import_path: monocle2py.load_fig1b_ordering_genes
+kind: function
+signature: load_fig1b_ordering_genes()
+purpose: load the fig1b ordering-gene table for the Olsson trajectory
+description: 'Load the ``fig1b.tsv`` ordering-gene table from the Olsson 2016
+
+  paper, used to seed the V2_3 trajectory. Columns match the original
+
+  R bundle: gene symbol and its fig1b cluster assignment.
+
+  '
+parameters: []
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: pd.DataFrame; kind=value
+requires: []
+writes: []
+examples:
+- fig1b = monocle2py.load_fig1b_ordering_genes()
+failure_fixes: []
+related:
+- monocle2py.set_ordering_filter
+- 'tested_on: monocle2py@2.9.0'

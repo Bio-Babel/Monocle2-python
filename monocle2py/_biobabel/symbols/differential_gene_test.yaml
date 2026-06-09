@@ -1,0 +1,84 @@
+id: monocle2py.differential_gene_test
+import_path: monocle2py.differential_gene_test
+kind: function
+signature: differential_gene_test(adata, full_model_formula_str='~sm.ns(Pseudotime, df=3)', reduced_model_formula_str='~1', relative_expr=True, cores=1, verbose=False)
+purpose: test each gene for differential expression along a formula; find genes whose expression changes with pseudotime
+description: 'Port of R''s ``differentialGeneTest``. For every gene, fits the full and
+
+  reduced models via VGAM-equivalent GLMs (statsmodels NegativeBinomial /
+
+  Tobit / Gaussian), compares them with a likelihood-ratio test, and
+
+  Benjamini-Hochberg adjusts the resulting p-values across the ``OK``
+
+  subset. The standard pseudotime DE call uses
+
+  ``"~sm.ns(Pseudotime, df=3)"`` vs ``"~1"`` — ``sm.ns`` / ``ns`` terms
+
+  map to a patsy natural spline.
+
+
+  Returns a DataFrame indexed by ``var_names`` with columns
+
+  ``status, family, pval, qval`` plus every column of ``var``. Does NOT
+
+  mutate the AnnData.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: full_model_formula_str
+  type: str
+  required: false
+  default: ~sm.ns(Pseudotime, df=3)
+- name: reduced_model_formula_str
+  type: str
+  required: false
+  default: ~1
+- name: relative_expr
+  type: bool
+  required: false
+  default: true
+  description: For NB families, divide counts by Size_Factor before rounding.
+- name: cores
+  type: int
+  required: false
+  default: 1
+  description: Signature parity only; per-gene fits run serially.
+- name: verbose
+  type: bool
+  required: false
+  default: false
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: pd.DataFrame; kind=value
+requires:
+- adata.obs.Size_Factor
+- adata.uns.monocle2
+writes: []
+examples:
+- de = monocle2py.differential_gene_test(adata, '~sm.ns(Pseudotime, df=3)', '~1')
+- de = monocle2py.differential_gene_test(adata, '~Cluster', '~1')
+failure_fixes:
+- when: 'ValueError: Formula term ''...'' not found in adata.obs columns'
+  suggest:
+  - Confirm every variable in the formula exists in adata.obs (case sensitive).
+  - For pseudotime DE, run order_cells first so adata.obs['Pseudotime'] exists.
+- when: 'ValueError: Call estimate_size_factors before differential_gene_test'
+  suggest:
+  - monocle2py.estimate_size_factors
+- when: 'ValueError: NaN values in Size_Factor column'
+  suggest:
+  - Re-run estimate_size_factors; NaN propagates from filtered-out cells with zero total counts.
+- when: 'ValueError: Inf/NaN values in adata.obs[<term>]'
+  suggest:
+  - Drop or impute NaN cells before testing — formula terms must be finite.
+- when: All rows status='FAIL'
+  suggest:
+  - Run estimate_dispersions first so disp_func is available — the default Poisson degeneracy makes NB fits unstable.
+  - Check that the response variance is non-zero (filter pseudo-constant genes via num_cells_expressed).
+related:
+- monocle2py.plot_pseudotime_heatmap
+- monocle2py.plot_genes_in_pseudotime
+- 'tested_on: monocle2py@2.9.0'

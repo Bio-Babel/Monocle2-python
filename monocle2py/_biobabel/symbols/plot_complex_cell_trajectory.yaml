@@ -1,0 +1,93 @@
+id: monocle2py.plot_complex_cell_trajectory
+import_path: monocle2py.plot_complex_cell_trajectory
+kind: function
+signature: plot_complex_cell_trajectory(adata, x=1, y=2, root_states=None, color_by='State', show_tree=True, show_backbone=True, backbone_color='black', markers=None, show_cell_names=False, cell_size=1.5, cell_link_size=0.75, cell_name_size=2, show_branch_points=True)
+purpose: tree-layout trajectory plot for highly-branched data; Reingold–Tilford layout rooted at a user state
+description: 'Port of R''s ``plot_complex_cell_trajectory``. Lays the centroid MST
+
+  out as a tree via igraph''s Reingold–Tilford algorithm rooted at the
+
+  cells in ``root_states`` (or, by default, the cells with
+
+  ``Pseudotime == 0``), and places each cell at its closest centroid''s
+
+  layout coordinate with a vertical stripplot jitter. Better than
+
+  ``plot_cell_trajectory`` when the trajectory has many branches that
+
+  overlap in the DDRTree 2-D embedding.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: x
+  type: int
+  required: false
+  default: 1
+- name: y
+  type: int
+  required: false
+  default: 2
+- name: root_states
+  type: Iterable[int] | None
+  required: false
+  default: null
+- name: color_by
+  type: str
+  required: false
+  default: State
+- name: show_tree
+  type: bool
+  required: false
+  default: true
+- name: show_backbone
+  type: bool
+  required: false
+  default: true
+- name: backbone_color
+  type: str
+  required: false
+  default: black
+- name: markers
+  type: Sequence[str] | None
+  required: false
+  default: null
+- name: show_cell_names
+  type: bool
+  required: false
+  default: false
+- name: cell_size
+  type: float
+  required: false
+  default: 1.5
+- name: cell_link_size
+  type: float
+  required: false
+  default: 0.75
+- name: cell_name_size
+  type: float
+  required: false
+  default: 2
+- name: show_branch_points
+  type: bool
+  required: false
+  default: true
+mutates: execution_class=plot; no declared in-place mutation; returns_kind=plot
+returns: GGPlot; kind=plot
+requires:
+- adata.obs.State
+- adata.uns.monocle2.ddrtree
+writes: []
+examples:
+- monocle2py.plot_complex_cell_trajectory(adata, root_states=[1])
+failure_fixes:
+- when: 'RuntimeError: State column missing'
+  suggest:
+  - monocle2py.order_cells
+- when: 'RuntimeError: No cells in State(s) [...]'
+  suggest:
+  - Pass states that exist in adata.obs['State'].astype(int).unique().
+related:
+- 'tested_on: monocle2py@2.9.0'

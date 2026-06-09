@@ -1,0 +1,38 @@
+id: monocle2py.tobit
+import_path: monocle2py.tobit
+kind: function
+signature: tobit(lower=0.0, upper=inf)
+purpose: build a Tobit (censored regression) expression family; model log10 FPKM/TPM with a lower detection limit
+description: 'Construct a ``Tobit`` family (VGAM ``tobit(Lower, Upper)``). The
+
+  Monocle2 GLM fits ``log10(x) ~ ...`` for Tobit, so ``lower`` and
+
+  ``upper`` are thresholds on the log10 scale. Defaults match R''s
+
+  ``tobit()`` (Lower=0, Upper=+Inf). Use for the FPKM/TPM-input branch
+
+  before ``relative2abs`` converts to integer counts (then re-wrap with
+
+  ``negbinomial_size``).
+
+  '
+parameters:
+- name: lower
+  type: float
+  required: false
+  default: 0.0
+- name: upper
+  type: float
+  required: false
+  default: .inf
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: Tobit; kind=value
+requires: []
+writes: []
+examples:
+- fam = monocle2py.tobit(lower=0.1)
+failure_fixes: []
+related:
+- monocle2py.new_cell_dataset
+- monocle2py.relative2abs
+- 'tested_on: monocle2py@2.9.0'

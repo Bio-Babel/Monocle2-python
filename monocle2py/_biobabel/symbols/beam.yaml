@@ -1,0 +1,109 @@
+id: monocle2py.beam
+import_path: monocle2py.beam
+kind: function
+signature: beam(adata, full_model_formula_str='~sm.ns(Pseudotime, df=3)*Branch', reduced_model_formula_str='~sm.ns(Pseudotime, df=3)', branch_states=None, branch_point=1, branch_labels=None, progenitor_method='sequential_split', stretch=True, relative_expr=True, cores=1, verbose=False)
+purpose: branch-dependent expression test; find genes that differ between two child branches at a branch point
+description: 'Port of R''s ``BEAM``. Builds a branch-assigned AnnData via
+
+  :func:`build_branch_cell_dataset` (duplicating progenitors across the
+
+  two child paths), then runs a per-gene LRT comparing the full model
+
+  (``~sm.ns(Pseudotime, df=3)*Branch``) vs reduced
+
+  (``~sm.ns(Pseudotime, df=3)``). Effectively a wrapper around
+
+  :func:`branch_test` that joins the result with the var DataFrame.
+
+
+  Returns a DataFrame indexed by gene id with ``status, family, pval,
+
+  qval`` plus var columns (including ``gene_short_name``). Two-branch
+
+  only — ``buildBranchCellDataSet`` raises on >2 branches.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: full_model_formula_str
+  type: str
+  required: false
+  default: ~sm.ns(Pseudotime, df=3)*Branch
+  description: Must contain 'Branch' or BEAM degenerates to a plain pseudotime test.
+- name: reduced_model_formula_str
+  type: str
+  required: false
+  default: ~sm.ns(Pseudotime, df=3)
+- name: branch_states
+  type: Sequence[int] | None
+  required: false
+  default: null
+  description: Two State values to delimit the branches. Overrides branch_point.
+- name: branch_point
+  type: int
+  required: false
+  default: 1
+  description: 1-based branch-point index, sorted by mean pseudotime of branch-point cells.
+- name: branch_labels
+  type: Sequence[str] | None
+  required: false
+  default: null
+  description: Two display labels for the branches; defaults to the centroid keys.
+- name: progenitor_method
+  type: str
+  required: false
+  default: sequential_split
+  description: '''sequential_split'' (R default — alternate progenitors) or ''duplicate''.'
+- name: stretch
+  type: bool
+  required: false
+  default: true
+  description: Rescale each branch's pseudotime to [0, 100].
+- name: relative_expr
+  type: bool
+  required: false
+  default: true
+- name: cores
+  type: int
+  required: false
+  default: 1
+- name: verbose
+  type: bool
+  required: false
+  default: false
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: pd.DataFrame; kind=value
+requires:
+- adata.obs.Pseudotime
+- adata.obs.State
+- adata.obs.Size_Factor
+- adata.uns.monocle2.ddrtree
+- adata.uns.monocle2.aux_ordering
+writes: []
+examples:
+- beam_res = monocle2py.beam(adata, branch_point=1)
+- beam_res = monocle2py.beam(adata, branch_states=[2, 3], stretch=True)
+failure_fixes:
+- when: 'RuntimeError: Please first order the cells in pseudotime using order_cells()'
+  suggest:
+  - monocle2py.order_cells
+- when: 'RuntimeError: No branch points detected'
+  suggest:
+  - Trajectory is linear — confirm reduce_dimension produced branches (check plot_cell_trajectory).
+  - Try different ordering genes (cluster-DEG selection rather than ~Media).
+- when: 'RuntimeError: branch_point=K is out of range'
+  suggest:
+  - Inspect uns.monocle2.aux_ordering.DDRTree.branch_points for available indices.
+  - branch_point is 1-based and pseudotime-ordered.
+- when: 'RuntimeError: Expected 2 branches, got N'
+  suggest:
+  - BEAM only supports 2-branch comparisons. For 3+ branches, run pairwise BEAM calls with branch_states.
+- when: 'RuntimeError: common ancestors between selected State values on path to root State'
+  suggest:
+  - The two branch_states do not share a common pre-branch ancestor. Pick states that descend from the same branch point.
+related:
+- monocle2py.plot_genes_branched_heatmap
+- monocle2py.plot_genes_branched_pseudotime
+- 'tested_on: monocle2py@2.9.0'

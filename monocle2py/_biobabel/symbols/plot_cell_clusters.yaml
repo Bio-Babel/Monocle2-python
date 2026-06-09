@@ -1,0 +1,64 @@
+id: monocle2py.plot_cell_clusters
+import_path: monocle2py.plot_cell_clusters
+kind: function
+signature: plot_cell_clusters(adata, x=1, y=2, color_by='Cluster', markers=None, show_cell_names=False, cell_size=1.5, cell_name_size=2)
+purpose: visualise density-peak clusters on the reduced embedding
+description: 'Port of R''s ``plot_cell_clusters``. Plots cells in their reduced
+
+  embedding (``obsm[''X_dr'']``, typically tSNE) coloured by ``Cluster``
+
+  or any other ``obs`` column. ``markers`` switches to a faceted
+
+  gene-expression overlay coloured by log10(value+0.1).
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: x
+  type: int
+  required: false
+  default: 1
+- name: y
+  type: int
+  required: false
+  default: 2
+- name: color_by
+  type: str
+  required: false
+  default: Cluster
+- name: markers
+  type: Sequence[str] | None
+  required: false
+  default: null
+- name: show_cell_names
+  type: bool
+  required: false
+  default: false
+- name: cell_size
+  type: float
+  required: false
+  default: 1.5
+- name: cell_name_size
+  type: float
+  required: false
+  default: 2
+mutates: execution_class=plot; no declared in-place mutation; returns_kind=plot
+returns: GGPlot; kind=plot
+requires:
+- adata.obsm.X_dr
+- adata.obs.Cluster
+writes: []
+examples:
+- monocle2py.plot_cell_clusters(adata)
+- monocle2py.plot_cell_clusters(adata, color_by='Hours')
+failure_fixes:
+- when: 'RuntimeError: Reduced dimensions missing'
+  suggest:
+  - monocle2py.reduce_dimension
+- when: 'RuntimeError: Cluster labels missing'
+  suggest:
+  - monocle2py.cluster_cells
+related:
+- 'tested_on: monocle2py@2.9.0'

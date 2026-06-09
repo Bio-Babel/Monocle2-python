@@ -1,0 +1,49 @@
+id: monocle2py.vst_exprs
+import_path: monocle2py.vst_exprs
+kind: function
+signature: vst_exprs(adata, model_name='blind', expr_matrix=None, round_vals=True)
+purpose: variance-stabilising transform of count data; produce VST-normalised matrix for heatmaps
+description: 'Port of R''s ``vstExprs``. Applies the variance-stabilising transform
+
+  to either ``adata.X`` (default) or a supplied ``expr_matrix``, using
+
+  the ``asymptDisp`` and ``extraPois`` coefficients fitted by
+
+  :func:`estimate_dispersions` under ``model_name`` (default
+
+  ``"blind"``). Returns a dense cells x genes matrix; does NOT mutate
+
+  the AnnData.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: model_name
+  type: str
+  required: false
+  default: blind
+- name: expr_matrix
+  type: np.ndarray | None
+  required: false
+  default: null
+  description: Pre-normalised matrix to transform. None → uses adata.X / Size_Factor.
+- name: round_vals
+  type: bool
+  required: false
+  default: true
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: np.ndarray; kind=value
+requires:
+- adata.obs.Size_Factor
+- adata.uns.monocle2.disp_fit_info
+writes: []
+examples:
+- vst = monocle2py.vst_exprs(adata)
+failure_fixes:
+- when: 'RuntimeError: No dispersion model named ''...''. Call estimate_dispersions'
+  suggest:
+  - monocle2py.estimate_dispersions
+related:
+- 'tested_on: monocle2py@2.9.0'

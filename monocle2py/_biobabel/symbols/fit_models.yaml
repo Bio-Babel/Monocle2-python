@@ -1,0 +1,54 @@
+id: monocle2py.fit_models
+import_path: monocle2py.fit_models
+kind: function
+signature: fit_models(adata, model_formula_str='~sm.ns(Pseudotime, df=3)', relative_expr=True, cores=1)
+purpose: fit one GLM per gene; produce model objects for gen_smooth_curves / response_matrix
+description: 'Port of R''s ``fitModel``. Internal helper for
+
+  :func:`gen_smooth_curves` and :func:`response_matrix`: returns a dict
+
+  ``{gene_id: statsmodels-result-or-None}``. Family dispatch matches
+
+  ``differential_gene_test`` — joint NB (``Negbinomial``), Tobit, or a
+
+  generic GLM with the dispersion alpha resolved from the cached
+
+  ``disp_func``. Failed fits become ``None``.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: model_formula_str
+  type: str
+  required: false
+  default: ~sm.ns(Pseudotime, df=3)
+- name: relative_expr
+  type: bool
+  required: false
+  default: true
+- name: cores
+  type: int
+  required: false
+  default: 1
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: dict[str, Any]; kind=value
+requires:
+- adata.obs.Size_Factor
+- adata.uns.monocle2.expression_family
+writes: []
+examples:
+- models = monocle2py.fit_models(adata, '~sm.ns(Pseudotime, df=3)')
+failure_fixes:
+- when: 'ValueError: Call estimate_size_factors before fit_models'
+  suggest:
+  - monocle2py.estimate_size_factors
+- when: Many genes map to None
+  suggest:
+  - Run estimate_dispersions first; the cached disp_func stabilises NB fits.
+  - Drop low-detection genes (num_cells_expressed >= 10) before fitting.
+related:
+- monocle2py.response_matrix
+- monocle2py.gen_smooth_curves
+- 'tested_on: monocle2py@2.9.0'

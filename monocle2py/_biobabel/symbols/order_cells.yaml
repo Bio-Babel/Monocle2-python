@@ -1,0 +1,77 @@
+id: monocle2py.order_cells
+import_path: monocle2py.order_cells
+kind: function
+signature: order_cells(adata, root_state=None, reverse=None)
+purpose: compute pseudotime and State labels along a DDRTree trajectory; re-anchor the trajectory root to a chosen State
+description: 'Port of R''s ``orderCells`` (DDRTree branch). Projects every cell onto the
+
+  principal graph learnt by ``reduce_dimension``, builds a cell-level MST on
+
+  the projections, picks a root cell from the MST diameter, and computes
+
+  pseudotime as the geodesic distance from that root. State labels come
+
+  from the principal-graph traversal: a cell''s State increments whenever
+
+  the DFS crosses a branch-point centroid (degree > 2). The ICA branch
+
+  from R is not ported.
+
+
+  **Important** — Calling with ``root_state=k`` only repositions the root and
+
+  recomputes ``Pseudotime``; ``State`` labels are preserved from the first
+
+  call (mirrors R order_cells.R:1153-1156). So the canonical idiom is:
+
+  ``order_cells(adata)`` once to seed States, then
+
+  ``order_cells(adata, root_state=k)`` to anchor pseudotime.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: root_state
+  type: int | None
+  required: false
+  default: null
+  description: State value to re-anchor pseudotime at. Requires a prior order_cells call.
+- name: reverse
+  type: bool | None
+  required: false
+  default: null
+  description: Swap the diameter endpoints when picking the root.
+mutates: execution_class=adata_mutation; mutates input object in place; returns_kind=same_object
+returns: AnnData; kind=same_object
+requires:
+- adata.obsm.X_dr
+writes:
+- adata.obs.Pseudotime
+- adata.obs.State
+- adata.obs.Parent
+- adata.uns.monocle2
+examples:
+- monocle2py.order_cells(adata)
+- monocle2py.order_cells(adata, root_state=2)
+- monocle2py.order_cells(adata, reverse=True)
+failure_fixes:
+- when: 'RuntimeError: dimensionality not yet reduced. Call reduce_dimension'
+  suggest:
+  - monocle2py.reduce_dimension
+- when: 'NotImplementedError: order_cells only ports the DDRTree branch'
+  suggest:
+  - Re-run reduce_dimension with reduction_method='DDRTree'. ICA is not ported.
+- when: 'RuntimeError: State / Pseudotime have not yet been set. Call order_cells without root_state first'
+  suggest:
+  - Call monocle2py.order_cells(adata) once before passing root_state.
+- when: 'RuntimeError: No cells for State = K'
+  suggest:
+  - Confirm K is in the categorical range — adata.obs['State'].astype(int).unique().
+  - States are 1-based (R convention).
+related:
+- monocle2py.differential_gene_test
+- monocle2py.beam
+- monocle2py.plot_cell_trajectory
+- 'tested_on: monocle2py@2.9.0'

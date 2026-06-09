@@ -1,0 +1,44 @@
+id: monocle2py.detect_genes
+import_path: monocle2py.detect_genes
+kind: function
+signature: detect_genes(adata, min_expr=None)
+purpose: count detected genes per cell and detected cells per gene; QC pre-filter for ordering-gene selection
+description: 'Port of R''s ``detectGenes``. Counts how many cells express each gene
+
+  above ``min_expr`` (default = ``uns.monocle2.lower_detection_limit``)
+
+  and how many genes each cell detects. Used immediately downstream of
+
+  ``new_cell_dataset`` to feed gene-level QC filtering and the ordering
+
+  filter (``set_ordering_filter``).
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: min_expr
+  type: float | None
+  required: false
+  default: null
+  description: Detection threshold. None → uses uns.monocle2.lower_detection_limit.
+mutates: execution_class=adata_mutation; mutates input object in place; returns_kind=same_object
+returns: AnnData; kind=same_object
+requires:
+- adata.uns.monocle2
+writes:
+- adata.var.num_cells_expressed
+- adata.obs.num_genes_expressed
+examples:
+- monocle2py.detect_genes(adata)
+- monocle2py.detect_genes(adata, min_expr=0.5)
+failure_fixes:
+- when: 'KeyError: ''monocle2'' state missing'
+  suggest:
+  - monocle2py.new_cell_dataset
+  explanation: detect_genes reads lower_detection_limit set by new_cell_dataset when min_expr is None. Pass an explicit min_expr to bypass.
+related:
+- monocle2py.estimate_size_factors
+- monocle2py.set_ordering_filter
+- 'tested_on: monocle2py@2.9.0'

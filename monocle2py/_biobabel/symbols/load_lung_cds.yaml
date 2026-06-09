@@ -1,0 +1,30 @@
+id: monocle2py.load_lung_cds
+import_path: monocle2py.load_lung_cds
+kind: function
+signature: load_lung_cds()
+purpose: load the pre-fit lung epithelium CDS (tutorial V2_2)
+description: 'Load a pre-trained AnnData from tutorial V2_2 (BEAM lung epithelium
+
+  demo). Already contains DDRTree state under
+
+  ``uns.monocle2.ddrtree`` (``K``, ``W``, ``mst_edges``, ``mst_weights``,
+
+  ``closest_vertex``) plus ``obsm[''X_dr'']`` and the ``Pseudotime`` /
+
+  ``State`` columns from ``order_cells``. Ready for ``beam`` /
+
+  branched plotting without re-running the trajectory.
+
+  '
+parameters: []
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: AnnData; kind=value
+requires: []
+writes: []
+examples:
+- lung = monocle2py.load_lung_cds()
+failure_fixes: []
+related:
+- monocle2py.beam
+- monocle2py.plot_genes_branched_heatmap
+- 'tested_on: monocle2py@2.9.0'

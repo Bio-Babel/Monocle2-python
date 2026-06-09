@@ -1,0 +1,111 @@
+id: monocle2py.cluster_cells
+import_path: monocle2py.cluster_cells
+kind: function
+signature: cluster_cells(adata, num_clusters=None, skip_rho_sigma=False, rho_threshold=None, delta_threshold=None, peaks=None, gaussian=True, method='densityPeak', random_state=2017, verbose=False)
+purpose: density-peak clustering on tSNE embedding; produce Cluster labels for ~Cluster differential gene tests
+description: 'Port of R ``clusterCells`` (densityPeak branch only — Louvain/DDRTree
+
+  modes from R are not ported). Implements the Rodriguez & Laio 2014
+
+  density-peak algorithm on ``adata.obsm[''X_dr'']`` (typically the tSNE
+
+  embedding). Writes ``Cluster`` (Categorical of stringified 1-based
+
+  ints), ``peaks`` (bool), ``halo`` (bool), ``delta``, ``rho``, and
+
+  ``nearest_higher_density_neighbor`` to ``obs``. Caches the chosen
+
+  ``dc`` and rho/delta thresholds in
+
+  ``uns.monocle2.density_peak``.
+
+
+  Typical use: run ``reduce_dimension(reduction_method=''tSNE'')`` first,
+
+  then ``cluster_cells``, inspect ``plot_rho_delta`` and
+
+  ``plot_cell_clusters``, and feed the ``Cluster`` column into
+
+  ``differential_gene_test(''~Cluster'', ''~1'')`` to select trajectory
+
+  ordering genes (the HSMM tutorial pattern).
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: num_clusters
+  type: int | None
+  required: false
+  default: null
+  description: Forces exactly num_clusters peaks by setting rho_threshold=0 and delta_threshold to the num_clusters-th largest delta.
+- name: skip_rho_sigma
+  type: bool
+  required: false
+  default: false
+  description: Reuse cached dc + rho/delta from a previous call.
+- name: rho_threshold
+  type: float | None
+  required: false
+  default: null
+- name: delta_threshold
+  type: float | None
+  required: false
+  default: null
+- name: peaks
+  type: np.ndarray | None
+  required: false
+  default: null
+  description: Pre-selected peak indices, overrides thresholds and num_clusters.
+- name: gaussian
+  type: bool
+  required: false
+  default: true
+  description: Gaussian kernel for local density; False uses hard cutoff.
+- name: method
+  type: str
+  required: false
+  default: densityPeak
+  description: Only 'densityPeak' is ported.
+- name: random_state
+  type: int
+  required: false
+  default: 2017
+- name: verbose
+  type: bool
+  required: false
+  default: false
+mutates: execution_class=adata_mutation; mutates input object in place; returns_kind=same_object
+returns: AnnData; kind=same_object
+requires:
+- adata.obsm.X_dr
+writes:
+- adata.obs.Cluster
+- adata.obs.peaks
+- adata.obs.halo
+- adata.obs.delta
+- adata.obs.rho
+- adata.obs.nearest_higher_density_neighbor
+- adata.uns.monocle2.density_peak
+examples:
+- monocle2py.cluster_cells(adata)
+- monocle2py.cluster_cells(adata, num_clusters=5)
+failure_fixes:
+- when: 'NotImplementedError: cluster_cells method=''...'' is not yet ported'
+  suggest:
+  - Only 'densityPeak' is supported. Louvain / DDRTree clustering modes from R are not ported.
+- when: 'RuntimeError: adata.obsm[''X_dr''] is missing'
+  suggest:
+  - monocle2py.reduce_dimension
+  explanation: cluster_cells reads the reduced embedding. Run reduce_dimension(reduction_method='tSNE') first.
+- when: 'RuntimeError: No density peaks selected'
+  suggest:
+  - Lower rho_threshold and/or delta_threshold.
+  - Pass num_clusters=K to force exactly K peaks.
+  - Inspect plot_rho_delta to pick thresholds visually.
+related:
+- monocle2py.plot_rho_delta
+- monocle2py.plot_cell_clusters
+- monocle2py.differential_gene_test
+- 'tested_on: monocle2py@2.9.0'

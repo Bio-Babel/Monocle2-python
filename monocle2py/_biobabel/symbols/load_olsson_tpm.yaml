@@ -1,0 +1,27 @@
+id: monocle2py.load_olsson_tpm
+import_path: monocle2py.load_olsson_tpm
+kind: function
+signature: load_olsson_tpm()
+purpose: load the Olsson 2016 TPM dataset (tutorial V2_3)
+description: 'Load the Olsson 2016 TPM-normalised expression matrix used by
+
+  tutorial V2_3. ``obs[''Type'']`` carries the WT / single-KO / double-KO
+
+  grouping derived from the column-name split that the R tutorial uses
+
+  as the trajectory covariate. Plug into ``new_cell_dataset`` with the
+
+  ``tobit`` family for the tutorial workflow.
+
+  '
+parameters: []
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: AnnData; kind=value
+requires: []
+writes: []
+examples:
+- olsson = monocle2py.load_olsson_tpm()
+failure_fixes: []
+related:
+- monocle2py.new_cell_dataset
+- 'tested_on: monocle2py@2.9.0'

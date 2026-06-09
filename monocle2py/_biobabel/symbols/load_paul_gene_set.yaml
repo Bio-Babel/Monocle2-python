@@ -1,0 +1,24 @@
+id: monocle2py.load_paul_gene_set
+import_path: monocle2py.load_paul_gene_set
+kind: function
+signature: load_paul_gene_set()
+purpose: load the Paul branch-analysis gene panels
+description: 'Load the Paul hematopoiesis branch panels saved alongside the tutorial
+
+  V2_4 dataset. Returns a dict with the original keys
+
+  ``positive_score_genes``, ``negtive_score_genes`` (R tutorial
+
+  misspelling preserved), ``all_down_valid``.
+
+  '
+parameters: []
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: dict[str, list[str]]; kind=value
+requires: []
+writes: []
+examples:
+- panels = monocle2py.load_paul_gene_set()
+failure_fixes: []
+related:
+- 'tested_on: monocle2py@2.9.0'

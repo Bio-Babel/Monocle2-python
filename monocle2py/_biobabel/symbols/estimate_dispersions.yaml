@@ -1,0 +1,76 @@
+id: monocle2py.estimate_dispersions
+import_path: monocle2py.estimate_dispersions
+kind: function
+signature: estimate_dispersions(adata, min_cells_detected=1, remove_outliers=True, model_name='blind', model_formula_str='~1')
+purpose: fit a Gamma-identity dispersion curve for NB families; prepare for vstExprs / differential_gene_test
+description: 'Port of R''s ``estimateDispersions``. Computes per-gene empirical
+
+  (mean, dispersion) moments, fits a Gamma-identity GLM
+
+  ``disp ~ asymptDisp + extraPois/mu``, optionally re-fits after dropping
+
+  high-Cook''s-distance outliers, and stores the result under
+
+  ``uns.monocle2.disp_fit_info[model_name]``. ``model_name="blind"`` is
+
+  the slot read by every downstream consumer (``differential_gene_test``,
+
+  ``vst_exprs``, ``plot_*_heatmap``). Only negbinomial / negbinomial.size
+
+  families are supported — calling with Tobit/gaussianff raises.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: min_cells_detected
+  type: int
+  required: false
+  default: 1
+  description: Minimum cells with rounded expression > lower_detection_limit for a gene to enter the fit.
+- name: remove_outliers
+  type: bool
+  required: false
+  default: true
+  description: Drop genes with Cook's distance > 4 / n_genes and refit.
+- name: model_name
+  type: str
+  required: false
+  default: blind
+  description: Slot name under uns.monocle2.disp_fit_info. Keep as 'blind' unless layering covariate-specific fits.
+- name: model_formula_str
+  type: str
+  required: false
+  default: ~1
+  description: Optional covariates; partitions cells by unique combinations of obs columns and pools the per-group (mu, disp) rows.
+mutates: execution_class=adata_mutation; mutates input object in place; returns_kind=same_object
+returns: AnnData; kind=same_object
+requires:
+- adata.obs.Size_Factor
+- adata.uns.monocle2
+writes:
+- adata.uns.monocle2
+examples:
+- monocle2py.estimate_dispersions(adata)
+failure_fixes:
+- when: 'ValueError: estimate_dispersions only supports negbinomial / negbinomial.size families'
+  suggest:
+  - Switch the AnnData's expression_family to negbinomial_size() (re-run new_cell_dataset).
+  - If your input is FPKM/TPM, route through relative2abs first.
+- when: 'ValueError: NaNs in Size_Factor column'
+  suggest:
+  - monocle2py.estimate_size_factors
+- when: 'RuntimeError: No genes pass min_cells_detected'
+  suggest:
+  - Lower min_cells_detected (default 1).
+  - Confirm lower_detection_limit isn't filtering everything out.
+- when: 'RuntimeError: Parametric dispersion fit failed: extraPois < 0'
+  suggest:
+  - Increase lower_detection_limit (e.g. 0.5) so the gene panel is more selective.
+  - Drop low-quality cells via Total_mRNAs / num_genes_expressed cuts.
+related:
+- monocle2py.differential_gene_test
+- monocle2py.vst_exprs
+- monocle2py.plot_pseudotime_heatmap
+- 'tested_on: monocle2py@2.9.0'

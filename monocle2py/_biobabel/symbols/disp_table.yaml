@@ -1,0 +1,37 @@
+id: monocle2py.disp_table
+import_path: monocle2py.disp_table
+kind: function
+signature: disp_table(adata, model_name='blind')
+purpose: tidy fitted-vs-empirical dispersion table
+description: 'Port of R''s ``dispersionTable``. Reads the cached dispersion fit
+
+  under ``uns.monocle2.disp_fit_info[model_name]`` and returns a tidy
+
+  DataFrame with columns ``gene_id, mean_expression, dispersion_fit,
+
+  dispersion_empirical``. Useful for plotting the dispersion fit
+
+  manually or inspecting individual gene calls.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: model_name
+  type: str
+  required: false
+  default: blind
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: pd.DataFrame; kind=value
+requires:
+- adata.uns.monocle2.disp_fit_info
+writes: []
+examples:
+- tbl = monocle2py.disp_table(adata)
+failure_fixes:
+- when: 'RuntimeError: No dispersion fit registered under ''...''. Call estimate_dispersions first'
+  suggest:
+  - monocle2py.estimate_dispersions
+related:
+- 'tested_on: monocle2py@2.9.0'

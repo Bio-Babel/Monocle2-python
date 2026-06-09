@@ -1,0 +1,36 @@
+id: monocle2py.estimate_t
+import_path: monocle2py.estimate_t
+kind: function
+signature: estimate_t(relative_expr_matrix, relative_expr_thresh=0.1)
+purpose: per-cell estimate of one-transcript abundance (Census)
+description: 'Port of the inner ``estimate_t`` from R Census. Computes the Gaussian-
+
+  kernel mode of ``log10`` relative expression (restricted to values
+
+  above ``relative_expr_thresh``) per cell, then returns ``10**mode``.
+
+  Used as a building block by :func:`relative2abs`.
+
+  '
+parameters:
+- name: relative_expr_matrix
+  type: np.ndarray
+  required: true
+  description: Cells x genes FPKM/TPM matrix.
+- name: relative_expr_thresh
+  type: float
+  required: false
+  default: 0.1
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: np.ndarray; kind=value
+requires: []
+writes: []
+examples:
+- t = monocle2py.estimate_t(fpkm.X)
+failure_fixes:
+- when: 'ValueError: need at least 2 data points'
+  suggest:
+  - Cells with <2 detected genes above threshold cannot be estimated. Filter out empty cells first.
+related:
+- monocle2py.relative2abs
+- 'tested_on: monocle2py@2.9.0'

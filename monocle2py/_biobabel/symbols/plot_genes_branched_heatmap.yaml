@@ -1,0 +1,127 @@
+id: monocle2py.plot_genes_branched_heatmap
+import_path: monocle2py.plot_genes_branched_heatmap
+kind: function
+signature: plot_genes_branched_heatmap(cds_subset, branch_point=1, branch_states=None, branch_labels="('Cell fate 1', 'Cell fate 2')", cluster_rows=True, hclust_method='ward.D2', num_clusters=6, hmcols=None, branch_colors="('#979797', '#F05662', '#7990C8')", add_annotation_row=None, add_annotation_col=None, show_rownames=False, use_gene_short_name=True, scale_max=3.0, scale_min=-3.0, norm_method='log', trend_formula='~sm.ns(Pseudotime, df=3) * Branch', return_heatmap=False, cores=1)
+purpose: branch-stitched gene heatmap (Pre-branch + Cell fate 1 + Cell fate 2); visualise BEAM hits across a branch point
+description: 'Port of R''s ``plot_genes_branched_heatmap``. Builds a
+
+  duplicated-progenitor branch CDS via
+
+  :func:`build_branch_cell_dataset`, smooths each gene along both
+
+  child branches on a 0..100 pseudotime grid, stitches the reversed
+
+  first branch to the second branch (with a column gap at the branch
+
+  point), row-scales, and renders a ``pheatmap`` with Branch +
+
+  Cluster annotations.
+
+
+  Typical use immediately downstream of :func:`beam`: pass the
+
+  significant-gene subset (``adata[:, top_branch_genes]``).
+
+  '
+parameters:
+- name: cds_subset
+  type: AnnData
+  required: true
+  description: Gene-subset AnnData (the genes you want shown).
+- name: branch_point
+  type: int
+  required: false
+  default: 1
+- name: branch_states
+  type: Sequence[int] | None
+  required: false
+  default: null
+- name: branch_labels
+  type: Sequence[str]
+  required: false
+  default: ('Cell fate 1', 'Cell fate 2')
+- name: cluster_rows
+  type: bool
+  required: false
+  default: true
+- name: hclust_method
+  type: str
+  required: false
+  default: ward.D2
+- name: num_clusters
+  type: int
+  required: false
+  default: 6
+- name: hmcols
+  type: Sequence[str] | None
+  required: false
+  default: null
+- name: branch_colors
+  type: Sequence[str]
+  required: false
+  default: ('#979797', '#F05662', '#7990C8')
+  description: Colours for (Pre-branch, fate 1, fate 2).
+- name: add_annotation_row
+  type: pd.DataFrame | None
+  required: false
+  default: null
+- name: add_annotation_col
+  type: pd.DataFrame | None
+  required: false
+  default: null
+- name: show_rownames
+  type: bool
+  required: false
+  default: false
+- name: use_gene_short_name
+  type: bool
+  required: false
+  default: true
+- name: scale_max
+  type: float
+  required: false
+  default: 3.0
+- name: scale_min
+  type: float
+  required: false
+  default: -3.0
+- name: norm_method
+  type: str
+  required: false
+  default: log
+- name: trend_formula
+  type: str
+  required: false
+  default: ~sm.ns(Pseudotime, df=3) * Branch
+- name: return_heatmap
+  type: bool
+  required: false
+  default: false
+  description: If True, returns a dict with branch matrices + ph object.
+- name: cores
+  type: int
+  required: false
+  default: 1
+mutates: execution_class=plot; no declared in-place mutation; returns_kind=plot
+returns: pheatmap; kind=plot
+requires:
+- adata.obs.Pseudotime
+- adata.obs.State
+- adata.uns.monocle2.ddrtree
+- adata.uns.monocle2.aux_ordering
+writes: []
+examples:
+- monocle2py.plot_genes_branched_heatmap(adata[:, top_genes], branch_point=1, num_clusters=4)
+- monocle2py.plot_genes_branched_heatmap(adata[:, top_genes], branch_states=[2, 3], norm_method='vstExprs')
+failure_fixes:
+- when: 'RuntimeError: State column missing'
+  suggest:
+  - monocle2py.order_cells
+- when: 'ValueError: norm_method must be ''log'' or ''vstExprs'''
+  suggest:
+  - Use 'log' (default) or run estimate_dispersions first for 'vstExprs'.
+- when: 'RuntimeError: Branch CDS must contain at least two branches'
+  suggest:
+  - Trajectory is linear. Use plot_pseudotime_heatmap for non-branched data.
+related:
+- 'tested_on: monocle2py@2.9.0'

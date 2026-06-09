@@ -1,0 +1,55 @@
+id: monocle2py.estimate_size_factors
+import_path: monocle2py.estimate_size_factors
+kind: function
+signature: estimate_size_factors(adata, locfunc='numpy.median', round_exprs=True, method='mean-geometric-mean-total')
+purpose: estimate per-cell normalization factors; prepare AnnData for negbinomial differential expression
+description: 'Port of R''s ``estimateSizeFactors``. Default DESeq1-style method
+
+  ``"mean-geometric-mean-total"`` computes ``Size_Factor[i] =
+
+  total_counts[i] / exp(mean(log(total_counts)))``. Required before
+
+  ``estimate_dispersions``, ``reduce_dimension`` (for NB families), and
+
+  ``differential_gene_test``. NaN size factors are replaced with 1.0.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: locfunc
+  type: Callable[[np.ndarray], float]
+  required: false
+  default: numpy.median
+  description: Used only by 'weighted-median' / 'median-geometric-mean' methods.
+- name: round_exprs
+  type: bool
+  required: false
+  default: true
+  description: Round counts to integers before computing the factor.
+- name: method
+  type: str
+  required: false
+  default: mean-geometric-mean-total
+  description: One of 'weighted-median', 'median-geometric-mean', 'median', 'mode', 'geometric-mean-total', 'mean-geometric-mean-total'. 'mode' is NotImplemented.
+mutates: execution_class=adata_mutation; mutates input object in place; returns_kind=same_object
+returns: AnnData; kind=same_object
+requires:
+- adata.uns.monocle2
+writes:
+- adata.obs.Size_Factor
+examples:
+- monocle2py.estimate_size_factors(adata)
+failure_fixes:
+- when: 'ValueError: Unknown size factor method'
+  suggest:
+  - Use 'mean-geometric-mean-total' (R default) unless you have a specific reason otherwise.
+- when: 'NotImplementedError: method=''mode'' requires estimate_t'
+  suggest:
+  - Use the default method, or run relative2abs first to produce census counts.
+related:
+- monocle2py.estimate_dispersions
+- monocle2py.reduce_dimension
+- monocle2py.differential_gene_test
+- 'tested_on: monocle2py@2.9.0'

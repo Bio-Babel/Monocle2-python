@@ -1,0 +1,50 @@
+id: monocle2py.response_matrix
+import_path: monocle2py.response_matrix
+kind: function
+signature: response_matrix(models, newdata=None, formula_str=None, cores=1)
+purpose: predict fitted means for a list of GLMs; evaluate fit_models output on new data
+description: 'Port of R''s ``responseMatrix``. Given the dict returned by
+
+  :func:`fit_models`, predicts the response-scale mean for each gene on
+
+  either ``newdata`` (requires ``formula_str``) or each fit''s fitted
+
+  values. Failed (``None``) fits become rows of NaN. Log10-response
+
+  families (Tobit / Gaussian) get back-transformed via ``10**``.
+
+  '
+parameters:
+- name: models
+  type: dict[str, Any] | Sequence[Any]
+  required: true
+  description: Output of fit_models.
+- name: newdata
+  type: pd.DataFrame | None
+  required: false
+  default: null
+  description: Required for out-of-sample prediction. Provide formula_str alongside.
+- name: formula_str
+  type: str | None
+  required: false
+  default: null
+  description: Original design-matrix formula. Required when newdata is supplied.
+- name: cores
+  type: int
+  required: false
+  default: 1
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: pd.DataFrame; kind=value
+requires: []
+writes: []
+examples:
+- preds = monocle2py.response_matrix(models, newdata=grid_df, formula_str='~sm.ns(Pseudotime, df=3)')
+failure_fixes:
+- when: 'ValueError: formula_str is required when newdata is provided'
+  suggest:
+  - Pass the same formula you used in fit_models.
+- when: 'RuntimeError: All model fits are None'
+  suggest:
+  - All fits failed; check fit_models input — try estimate_dispersions or filter low-detection genes.
+related:
+- 'tested_on: monocle2py@2.9.0'

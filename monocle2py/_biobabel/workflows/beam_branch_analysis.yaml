@@ -1,0 +1,54 @@
+id: monocle2py.beam_branch_analysis
+title: Beam Branch Analysis
+description: 'BEAM (branch-dependent expression) workflow on top of an already-
+
+  ordered AnnData. Prerequisites: a completed basic_trajectory pipeline
+
+  with obs.Pseudotime, obs.State, uns.monocle2.ddrtree, and
+
+  uns.monocle2.aux_ordering populated. Two steps: run BEAM at a chosen
+
+  branch point, then render the branched gene heatmap on the significant
+
+  hits. Mirrors tutorial V2_2_lung_BEAM.
+
+  '
+task_tags:
+- branch-dependent expression test
+- find genes that diverge at a trajectory branch point
+- BEAM differential expression
+- pseudotime
+- trajectory
+- branch
+- beam
+when_to_use:
+- branch-dependent expression test
+- find genes that diverge at a trajectory branch point
+- BEAM differential expression
+when_not_to_use: []
+inputs:
+- name: ''
+  kind: AnnData
+  description: Cells x genes AnnData with a full DDRTree trajectory already computed (run basic_trajectory first).
+  requirements: []
+steps:
+- symbol: monocle2py.beam
+  purpose: Per-gene LRT comparing full (Branch interaction) vs reduced (no Branch) model on a duplicated-progenitor branch CDS. Returns a DataFrame with status, family, pval, qval, and var columns. Does NOT mutate adata. (Reads nested uns.monocle2.ddrtree + aux_ordering via obsm.X_dr marker.)
+  args:
+    branch_point: 1
+    full_model_formula_str: ~sm.ns(Pseudotime, df=3)*Branch
+    reduced_model_formula_str: ~sm.ns(Pseudotime, df=3)
+  notes:
+  - 'requires: obs.Pseudotime, obs.State, obs.Size_Factor, obsm.X_dr, uns.monocle2'
+- symbol: monocle2py.plot_genes_branched_heatmap
+  purpose: Stitched (Pre-branch + Cell fate 1 + Cell fate 2) heatmap of the BEAM-significant genes. Pass adata[:, top_branch_genes] as the input. (Reads nested uns.monocle2.ddrtree + aux_ordering via obsm.X_dr marker.)
+  args:
+    branch_point: 1
+    num_clusters: 4
+    use_gene_short_name: true
+  notes:
+  - 'requires: obs.Pseudotime, obs.State, obsm.X_dr, uns.monocle2'
+templates: []
+outputs:
+- 'DataFrame - <in-memory> - BEAM result: status, family, pval, qval + var columns (including gene_short_name).'
+- pheatmap - <in-memory> - Rendered branched heatmap. Wrap with grid_py to display in notebooks.

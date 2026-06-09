@@ -1,0 +1,27 @@
+id: monocle2py.negbinomial
+import_path: monocle2py.negbinomial
+kind: function
+signature: negbinomial()
+purpose: build a joint-MLE negative binomial expression family
+description: 'Construct a ``Negbinomial`` family (VGAM ``negbinomial``). Unlike
+
+  ``NegbinomialSize``, the dispersion (size) is jointly estimated
+
+  alongside the mean parameters by ``fit_joint_nb`` in each per-gene
+
+  fit. Slower than ``negbinomial_size`` but does not require a prior
+
+  ``estimate_dispersions``.
+
+  '
+parameters: []
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: Negbinomial; kind=value
+requires: []
+writes: []
+examples:
+- fam = monocle2py.negbinomial()
+failure_fixes: []
+related:
+- monocle2py.new_cell_dataset
+- 'tested_on: monocle2py@2.9.0'

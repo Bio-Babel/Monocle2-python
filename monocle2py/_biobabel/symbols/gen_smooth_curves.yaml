@@ -1,0 +1,51 @@
+id: monocle2py.gen_smooth_curves
+import_path: monocle2py.gen_smooth_curves
+kind: function
+signature: gen_smooth_curves(adata, new_data, trend_formula='~sm.ns(Pseudotime, df=3)', relative_expr=True, cores=1)
+purpose: fit a trend per gene and evaluate on a pseudotime grid; produce smooth expression curves for heatmaps / line plots
+description: 'Port of R''s ``genSmoothCurves``. Convenience wrapper that fits the
+
+  trend formula per gene via :func:`fit_models` and predicts on
+
+  ``new_data``. Used internally by the heatmap and per-gene plot
+
+  helpers. Returns a genes x ``len(new_data)`` DataFrame.
+
+  '
+parameters:
+- name: adata
+  type: AnnData
+  required: true
+- name: new_data
+  type: pd.DataFrame
+  required: true
+  description: DataFrame holding the variables in trend_formula (e.g. a Pseudotime grid).
+- name: trend_formula
+  type: str
+  required: false
+  default: ~sm.ns(Pseudotime, df=3)
+- name: relative_expr
+  type: bool
+  required: false
+  default: true
+- name: cores
+  type: int
+  required: false
+  default: 1
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: pd.DataFrame; kind=value
+requires:
+- adata.obs.Size_Factor
+- adata.uns.monocle2.expression_family
+writes: []
+examples:
+- 'curves = monocle2py.gen_smooth_curves(adata, pd.DataFrame({''Pseudotime'': np.linspace(0, 100, 100)}))'
+failure_fixes:
+- when: 'ValueError: formula_str is required when newdata is provided'
+  suggest:
+  - Pass new_data with the variables your trend_formula references.
+- when: 'RuntimeError: All model fits are None'
+  suggest:
+  - Pre-filter low-detection genes and ensure estimate_dispersions has been called.
+related:
+- 'tested_on: monocle2py@2.9.0'

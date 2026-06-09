@@ -1,0 +1,84 @@
+id: monocle2py.plot_genes_in_pseudotime
+import_path: monocle2py.plot_genes_in_pseudotime
+kind: function
+signature: plot_genes_in_pseudotime(cds_subset, min_expr=None, cell_size=0.75, nrow=None, ncol=1, panel_order=None, color_by='State', trend_formula='~sm.ns(Pseudotime, df=3)', label_by_short_name=True, relative_expr=True, vertical_jitter=None, horizontal_jitter=None)
+purpose: faceted per-gene expression vs pseudotime; visualise smoothed trend curves alongside raw cells
+description: 'Port of R''s ``plot_genes_in_pseudotime``. Operates on a gene-subset
+
+  AnnData (typical idiom: ``adata[:, marker_ids]``). For each gene,
+
+  scatter-plots the raw expression and overlays a natural-spline trend
+
+  curve from :func:`gen_smooth_curves`. Returns a ``ggplot2_py.GGPlot``
+
+  with one facet per gene; log10 y-axis.
+
+  '
+parameters:
+- name: cds_subset
+  type: AnnData
+  required: true
+  description: Gene-subset AnnData, e.g. adata[:, marker_ids].
+- name: min_expr
+  type: float | None
+  required: false
+  default: null
+  description: None → reads uns.monocle2.lower_detection_limit.
+- name: cell_size
+  type: float
+  required: false
+  default: 0.75
+- name: nrow
+  type: int | None
+  required: false
+  default: null
+- name: ncol
+  type: int
+  required: false
+  default: 1
+- name: panel_order
+  type: Sequence[str] | None
+  required: false
+  default: null
+- name: color_by
+  type: str | None
+  required: false
+  default: State
+- name: trend_formula
+  type: str
+  required: false
+  default: ~sm.ns(Pseudotime, df=3)
+- name: label_by_short_name
+  type: bool
+  required: false
+  default: true
+- name: relative_expr
+  type: bool
+  required: false
+  default: true
+- name: vertical_jitter
+  type: float | None
+  required: false
+  default: null
+- name: horizontal_jitter
+  type: float | None
+  required: false
+  default: null
+mutates: execution_class=plot; no declared in-place mutation; returns_kind=plot
+returns: GGPlot; kind=plot
+requires:
+- adata.obs.Pseudotime
+- adata.uns.monocle2
+writes: []
+examples:
+- monocle2py.plot_genes_in_pseudotime(adata[:, marker_ids])
+failure_fixes:
+- when: 'RuntimeError: Pseudotime missing'
+  suggest:
+  - monocle2py.order_cells
+- when: empty plot / KeyError on gene IDs
+  suggest:
+  - Confirm cds_subset is gene-subset (adata[:, gene_ids]) not the full AnnData.
+  - Pass label_by_short_name=False if your var has no gene_short_name column.
+related:
+- 'tested_on: monocle2py@2.9.0'

@@ -1,0 +1,111 @@
+id: monocle2py.plot_pseudotime_heatmap
+import_path: monocle2py.plot_pseudotime_heatmap
+kind: function
+signature: plot_pseudotime_heatmap(cds_subset, cluster_rows=True, hclust_method='ward.D2', num_clusters=6, hmcols=None, add_annotation_row=None, add_annotation_col=None, show_rownames=False, use_gene_short_name=True, norm_method='log', scale_max=3.0, scale_min=-3.0, trend_formula='~sm.ns(Pseudotime, df=3)', return_heatmap=False, cores=1)
+purpose: row-clustered heatmap of genes across pseudotime; visualise pseudotime-dependent gene modules
+description: 'Port of R''s ``plot_pseudotime_heatmap``. Smooths each gene''s
+
+  expression on a 100-point pseudotime grid via
+
+  :func:`gen_smooth_curves`, log10 or VST normalises, row-centres and
+
+  scales to [scale_min, scale_max], then renders a row-clustered
+
+  ``pheatmap``. Genes are cut into ``num_clusters`` modules via
+
+  hierarchical clustering on (1-corr)/2 distances. ``norm_method=''vstExprs''``
+
+  requires a prior ``estimate_dispersions`` call.
+
+
+  Returns a ``pheatmap`` result object.
+
+  '
+parameters:
+- name: cds_subset
+  type: AnnData
+  required: true
+  description: Gene-subset AnnData restricted to the genes you want to display.
+- name: cluster_rows
+  type: bool
+  required: false
+  default: true
+- name: hclust_method
+  type: str
+  required: false
+  default: ward.D2
+- name: num_clusters
+  type: int
+  required: false
+  default: 6
+- name: hmcols
+  type: Sequence[str] | None
+  required: false
+  default: null
+- name: add_annotation_row
+  type: pd.DataFrame | None
+  required: false
+  default: null
+- name: add_annotation_col
+  type: pd.DataFrame | None
+  required: false
+  default: null
+  description: Must have exactly 100 rows (one per pseudotime grid point) if supplied.
+- name: show_rownames
+  type: bool
+  required: false
+  default: false
+- name: use_gene_short_name
+  type: bool
+  required: false
+  default: true
+- name: norm_method
+  type: str
+  required: false
+  default: log
+  description: '''log'' or ''vstExprs''. ''vstExprs'' needs estimate_dispersions first.'
+- name: scale_max
+  type: float
+  required: false
+  default: 3.0
+- name: scale_min
+  type: float
+  required: false
+  default: -3.0
+- name: trend_formula
+  type: str
+  required: false
+  default: ~sm.ns(Pseudotime, df=3)
+- name: return_heatmap
+  type: bool
+  required: false
+  default: false
+- name: cores
+  type: int
+  required: false
+  default: 1
+mutates: execution_class=plot; no declared in-place mutation; returns_kind=plot
+returns: pheatmap; kind=plot
+requires:
+- adata.obs.Pseudotime
+- adata.obs.Size_Factor
+- adata.uns.monocle2
+writes: []
+examples:
+- monocle2py.plot_pseudotime_heatmap(adata[:, top_genes], num_clusters=4)
+- monocle2py.plot_pseudotime_heatmap(adata[:, top_genes], norm_method='vstExprs', show_rownames=True)
+failure_fixes:
+- when: 'RuntimeError: Pseudotime missing'
+  suggest:
+  - monocle2py.order_cells
+- when: 'ValueError: norm_method must be ''log'' or ''vstExprs'''
+  suggest:
+  - Use 'log' (safe default) or run estimate_dispersions first to enable 'vstExprs'.
+- when: 'ValueError: add_annotation_col should have only 100 rows'
+  suggest:
+  - Build annotation_col with exactly 100 rows matching the smoothed pseudotime grid.
+- when: empty heatmap / all rows filtered
+  suggest:
+  - Many genes have zero variance after smoothing — pre-filter to genes with qval<0.1 in a differential_gene_test pseudotime run.
+related:
+- 'tested_on: monocle2py@2.9.0'

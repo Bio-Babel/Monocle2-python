@@ -77,6 +77,8 @@ Documentation       = "https://github.com/Bio-Babel/Monocle2-python#readme"
 "Upstream (R package)"    = "https://github.com/cole-trapnell-lab/monocle-release"
 "Tutorial data (Zenodo)"  = "https://zenodo.org/records/19699224"
 
+[project.entry-points."biobabel.manifest"]
+monocle2py = "monocle2py._biobabel:get_manifest"
 [tool.hatch.build.targets.wheel]
 packages = ["monocle2py"]
 
@@ -99,3 +101,6 @@ testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow integration tests (deselect with '-m \"not slow\"')",
 ]
+
+[tool.biobabel]
+contract_class = "analysis"

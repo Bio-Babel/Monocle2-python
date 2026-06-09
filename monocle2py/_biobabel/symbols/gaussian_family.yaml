@@ -1,0 +1,25 @@
+id: monocle2py.gaussian_family
+import_path: monocle2py.gaussian_family
+kind: function
+signature: gaussian_family()
+purpose: build a Gaussian expression family for pre-transformed data
+description: 'Construct a ``GaussianFamily`` (VGAM ``uninormal``, raw-response) for use with
+
+  already-transformed (e.g. log-CPM) expression matrices.
+
+  ``normalize_expr_data`` only accepts ``norm_method=''none''`` with this
+
+  family.
+
+  '
+parameters: []
+mutates: execution_class=stateless; no declared in-place mutation; returns_kind=value
+returns: GaussianFamily; kind=value
+requires: []
+writes: []
+examples:
+- fam = monocle2py.gaussian_family()
+failure_fixes: []
+related:
+- monocle2py.new_cell_dataset
+- 'tested_on: monocle2py@2.9.0'
