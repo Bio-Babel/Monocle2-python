@@ -1,0 +1,36 @@
+id: monocle2py.beam_needs_branch_term
+name: BEAM needs a Branch term
+category: branch-analysis
+description: 'BEAM detects branch-dependent expression by contrasting a full model
+
+  that includes a `Branch` term against a reduced model that does not. The default
+
+  `full_model_formula_str="~sm.ns(Pseudotime, df=3)*Branch"` triggers the internal
+
+  branch-CDS build. Removing `Branch` from the full formula silently degenerates
+
+  BEAM into a vanilla pseudotime DE test — no exception is raised, the question
+
+  being answered just quietly changes.
+
+  '
+invariants:
+- "BEAM's `full_model_formula_str` must contain a `Branch` term; the default is `~sm.ns(Pseudotime, df=3)*Branch`."
+- Dropping `Branch` from the full formula degenerates BEAM into a plain pseudotime DE test, with no exception raised.
+mental_model: 'For R users:
+
+  Same as R Monocle2''s `BEAM()` / `~sm.ns(Pseudotime, df=3)*Branch` LRT — the
+
+  `Branch` interaction is what makes it a branch test rather than a pseudotime test.
+
+
+  For Python users:
+
+  The `Branch` token in the formula string is load-bearing. It is not validated
+
+  for presence, so a typo or omission produces a syntactically valid but
+
+  semantically different (pseudotime-only) test.'
+related_concepts:
+- monocle2py.state_is_1based_categorical
+- monocle2py.root_state_does_not_renumber

@@ -1,0 +1,44 @@
+id: monocle2py.counts_not_fpkm_for_nb
+name: Counts, not FPKM, for NB families
+category: data-input
+description: 'Monocle2 negative-binomial families (`negbinomial`, `negbinomial.size`)
+
+  need integer-like counts. Feeding them FPKM/TPM relative-abundance values is a
+
+  common mistake. Route FPKM/TPM through `relative2abs(method="num_genes")` to
+
+  reconstruct absolute transcript counts (Census), then build a FRESH
+
+  `new_cell_dataset` on the census output with the default `negbinomial.size`
+
+  family before running any trajectory steps. The `Tobit` and Gaussian
+
+  (`gaussian_family()`, vfamily `uninormal`) families do NOT need counts/size
+
+  factors.
+
+  '
+invariants:
+- NB families (`negbinomial`, `negbinomial.size`) require integer-like counts, not FPKM/TPM.
+- For FPKM/TPM input, run `relative2abs(method="num_genes")` first, then rebuild a fresh `new_cell_dataset` on the census output before trajectory steps.
+- NB families need size factors; calling `reduce_dimension` / `differential_gene_test` on an NB family without `estimate_size_factors` raises.
+- The `Tobit` and Gaussian (`gaussian_family()`, vfamily `uninormal`) families do not need size factors.
+mental_model: 'For R users:
+
+  Mirrors R Monocle2''s `relativeAbs()` / Census workflow: FPKM in, estimated
+
+  absolute counts out, then a new `CellDataSet` with `negbinomial.size()`.
+
+
+  For Python users:
+
+  The family choice (set at `new_cell_dataset`) and the data scale must agree.
+
+  NB math assumes counts; FPKM violates that assumption. Rebuilding the dataset
+
+  after `relative2abs` is the only correct route — you cannot patch the family
+
+  in place.'
+related_concepts:
+- monocle2py.pipeline_state_machine
+- monocle2py.ordering_filter_restricts_ddrtree

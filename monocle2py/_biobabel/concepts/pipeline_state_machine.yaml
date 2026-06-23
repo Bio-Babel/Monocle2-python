@@ -1,0 +1,59 @@
+id: monocle2py.pipeline_state_machine
+name: Pipeline state machine
+category: workflow
+description: 'Monocle2 is an ordered state machine over a single `AnnData` (cells x genes).
+
+  Each step writes specific slots that downstream steps read, so the order is
+
+  load-bearing:
+
+
+  1. new_cell_dataset           -> uns.monocle2 (family + lower_detection_limit), obs.Size_Factor (NaN init)
+
+  2. detect_genes               -> var.num_cells_expressed, obs.num_genes_expressed
+
+  3. estimate_size_factors      -> obs.Size_Factor (filled)
+
+  4. estimate_dispersions       -> uns.monocle2.disp_fit_info["blind"] (NB families only)
+
+  5. set_ordering_filter        -> var.use_for_ordering (boolean mask)
+
+  6. reduce_dimension(DDRTree)  -> obsm.X_dr, uns.monocle2.ddrtree{...}, uns.monocle2.dim_reduce_type
+
+  7. order_cells                -> obs.Pseudotime, obs.State, obs.Parent, uns.monocle2.aux_ordering.DDRTree{...}
+
+  8. differential_gene_test / beam -> DataFrame (NOT mutating)
+
+
+  Steps 1-7 mutate the AnnData in place; the DE/BEAM tests RETURN a DataFrame and
+
+  never write back. Plotting helpers consume the populated slots and return a
+
+  `ggplot2_py.GGPlot` (or a `pheatmap` object for heatmaps).
+
+  '
+invariants:
+- The pipeline is ordered — each step reads slots written by earlier steps; running steps out of order operates on missing or stale state.
+- Steps 1-7 (new_cell_dataset through order_cells) mutate the AnnData in place.
+- '`differential_gene_test` and `beam` RETURN a DataFrame and never mutate the AnnData; to persist results, store them yourself (e.g. `adata.uns["beam_results"] = beam(...)`).'
+- '`differential_gene_test` returns a DataFrame indexed by `gene_id`.'
+mental_model: 'For R users:
+
+  The 8 steps mirror the classical R Monocle2 workflow on a `CellDataSet`; here
+
+  the S4 `CellDataSet` is replaced by `anndata.AnnData`, but the call order and
+
+  per-step side effects are 1:1.
+
+
+  For Python users:
+
+  Think of `adata` as the single mutable state object threaded through steps 1-7.
+
+  There is no pipeline object — the AnnData IS the pipeline state, and each
+
+  function reads/writes named slots on it.'
+related_concepts:
+- monocle2py.uns_monocle2_is_load_bearing
+- monocle2py.ordering_filter_restricts_ddrtree
+- monocle2py.state_is_1based_categorical

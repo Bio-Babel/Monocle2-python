@@ -1,0 +1,41 @@
+id: monocle2py.uns_monocle2_is_load_bearing
+name: uns["monocle2"] is load-bearing
+category: state-representation
+description: 'All persistent Monocle2 state lives under `adata.uns["monocle2"]` (plus a
+
+  small fixed set of obs / var / obsm columns). `new_cell_dataset` always creates
+
+  `uns["monocle2"]`, and it is non-optional — it holds the family,
+
+  `lower_detection_limit`, dispersion fit info, the DDRTree results
+
+  (`ddrtree{...}`, `dim_reduce_type`), and `aux_ordering`. AnnData subsetting does
+
+  NOT carry `uns["monocle2"]` along automatically: when you subset, propagate it
+
+  manually (`sub.uns["monocle2"] = dict(adata.uns["monocle2"])`) or downstream
+
+  steps lose the DDRTree state.
+
+  '
+invariants:
+- '`adata.uns["monocle2"]` is non-optional and is always created by `new_cell_dataset`.'
+- All persistent Monocle2 state (family, lower_detection_limit, dispersion fit, DDRTree results, aux_ordering) lives under `adata.uns["monocle2"]`.
+- Subsetting an AnnData does not preserve `uns["monocle2"]`; propagate it manually (`sub.uns["monocle2"] = dict(adata.uns["monocle2"])`) or downstream steps lose DDRTree state.
+mental_model: 'For R users:
+
+  Where R Monocle2 packs trajectory state into `CellDataSet` slots, monocle2py
+
+  packs it into one dict under `adata.uns["monocle2"]`.
+
+
+  For Python users:
+
+  AnnData propagates obs/var/obsm on a subset but treats `uns` as global
+
+  metadata that does not always follow a slice. Carry the `monocle2` dict across
+
+  subsets by hand — it is the single source of truth for DDRTree/ordering state.'
+related_concepts:
+- monocle2py.pipeline_state_machine
+- monocle2py.state_is_1based_categorical

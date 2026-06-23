@@ -1,0 +1,43 @@
+id: monocle2py.state_is_1based_categorical
+name: State is a 1-based categorical
+category: state-representation
+description: '`obs["State"]` is a `pd.Categorical` of stringified 1-based integers
+
+  (`"1"`, `"2"`, ...) written by `order_cells`. The string-categorical dtype is the
+
+  single most common footgun: comparing the categorical against a raw int
+
+  (`State == 1`) silently miscompares and returns all-False rather than raising.
+
+  Cast first: `adata.obs["State"].astype(int) == 1`. Because labels are 1-based,
+
+  there is never a State 0 — indexing branches at State 0 is always wrong.
+
+
+  BEAM is the exception: it accepts ints (`branch_states=[2, 3]`) and casts
+
+  internally.
+
+  '
+invariants:
+- '`obs["State"]` is a `pd.Categorical` whose values are stringified 1-based integers (`"1"`, `"2"`, ...).'
+- Compare State via `adata.obs["State"].astype(int) == k`, never `== k` against the raw categorical (which silently returns all-False).
+- State labels are 1-based, so there is no State 0; indexing branches at `branch_states=[0, ...]` against a State range of `{"1","2","3"}` raises `No cells in State == 0`.
+- BEAM accepts integer `branch_states` (e.g. `[2, 3]`) and casts them internally.
+mental_model: 'For R users:
+
+  Same 1-based numeric State segments as R Monocle2, surfaced here as a pandas
+
+  Categorical of strings rather than an R factor.
+
+
+  For Python users:
+
+  The values look numeric but are strings inside a Categorical. A direct `== int`
+
+  comparison crosses dtypes and pandas returns False element-wise without error —
+
+  always `.astype(int)` before any numeric comparison or branch selection.'
+related_concepts:
+- monocle2py.root_state_does_not_renumber
+- monocle2py.beam_needs_branch_term

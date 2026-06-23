@@ -1,0 +1,34 @@
+id: monocle2py.ordering_filter_restricts_ddrtree
+name: Ordering filter restricts DDRTree
+category: workflow
+description: '`set_ordering_filter` writes the boolean `var["use_for_ordering"]` mask
+
+  that selects which genes DDRTree sees. It is effectively required before
+
+  `reduce_dimension(method="DDRTree")` for variable-gene selection to take effect.
+
+  If `var["use_for_ordering"]` is absent or all-False, `reduce_dimension` silently
+
+  runs DDRTree on EVERY gene — a noisy trajectory rather than an error. This is a
+
+  quiet footgun, not a loud one: nothing raises, the trajectory is just wrong.
+
+  '
+invariants:
+- '`set_ordering_filter` is effectively required before `reduce_dimension(method="DDRTree")` for variable-gene selection to take effect.'
+- If `var["use_for_ordering"]` is absent or all-False, `reduce_dimension` runs DDRTree on every gene (a noisy trajectory), and does NOT raise.
+mental_model: 'For R users:
+
+  Equivalent to `setOrderingFilter()` setting `use_for_ordering` on the
+
+  `CellDataSet` before `reduceDimension()`; same gating semantics.
+
+
+  For Python users:
+
+  The mask is just a boolean column in `adata.var`. DDRTree reads it implicitly;
+
+  forgetting it does not error, it silently widens the gene set to everything.'
+related_concepts:
+- monocle2py.pipeline_state_machine
+- monocle2py.counts_not_fpkm_for_nb

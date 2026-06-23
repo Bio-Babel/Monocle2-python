@@ -1,0 +1,43 @@
+id: monocle2py.root_state_does_not_renumber
+name: root_state does not renumber State
+category: state-representation
+description: 'Only the first `order_cells()` call (with `root_state=None`) populates
+
+  `obs["State"]`. Re-running `order_cells(root_state=k)` re-anchors the trajectory
+
+  root and only updates `obs["Pseudotime"]` — it does NOT renumber `State`. The
+
+  State labels are frozen from that first call. This mirrors R behavior and is
+
+  load-bearing for BEAM, which reads the original State numbering.
+
+
+  `obs["Pseudotime"] == 0` marks the trajectory root cell in DDRTree mode; multiple
+
+  cells can share `Pseudotime == 0`, and the first is treated as the canonical root
+
+  by branch-path discovery.
+
+  '
+invariants:
+- The first `order_cells()` call (`root_state=None`) populates `obs["State"]`; subsequent `order_cells(root_state=k)` calls only update `obs["Pseudotime"]`.
+- '`order_cells(root_state=k)` re-anchors Pseudotime only — it does NOT renumber State. State labels are frozen from the first `order_cells()` call.'
+- The frozen State numbering is load-bearing for BEAM, which reads the original labels.
+- '`obs["Pseudotime"] == 0` marks the trajectory root cell in DDRTree mode; when several cells share `Pseudotime == 0`, the first is the canonical root for branch-path discovery.'
+mental_model: 'For R users:
+
+  Same as R Monocle2: re-rooting via `orderCells(root_state=...)` shifts
+
+  pseudotime origin without relabeling segments.
+
+
+  For Python users:
+
+  Treat State as immutable after the first `order_cells`. Re-rooting is a
+
+  pseudotime-only operation; downstream code (especially BEAM) depends on the
+
+  original State labels staying put.'
+related_concepts:
+- monocle2py.state_is_1based_categorical
+- monocle2py.beam_needs_branch_term
