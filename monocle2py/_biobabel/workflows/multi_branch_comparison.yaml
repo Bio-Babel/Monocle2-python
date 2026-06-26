@@ -1,0 +1,97 @@
+id: monocle2py.multi_branch_comparison
+title: Multi Branch Comparison
+description: 'Compare gene-expression dynamics across three or more terminal
+
+  branches of an already-ordered DDRTree trajectory (a highly-branched
+
+  "complex" tree). Prerequisites: a completed basic_trajectory pipeline
+
+  (obs.Pseudotime, obs.State, uns.monocle2.ddrtree, uns.monocle2.aux_ordering)
+
+  or a bundled pre-ordered CDS such as load_paul_cds. Optionally re-anchor
+
+  the root to the progenitor State, lay the branched tree out with
+
+  plot_complex_cell_trajectory, then contrast a marker panel across the
+
+  chosen terminal branches with per-gene branch-aligned curves and a
+
+  stitched multi-branch heatmap. Unlike beam_branch_analysis (a statistical
+
+  LRT at one branch point with two fates), this visualises several terminal
+
+  lineages at once. Mirrors tutorial V2_4_Paul.
+
+  '
+task_tags:
+- compare expression across multiple terminal branches
+- multi-lineage trajectory comparison
+- branch-aligned expression heatmap
+- complex trajectory visualisation
+- pseudotime
+- trajectory
+- branch
+when_to_use:
+- compare a gene's expression across three or more terminal branches
+- multi-branch / complex trajectory downstream visualisation
+- align several terminal lineages on a common pseudotime axis
+when_not_to_use:
+- testing branch-dependent expression at a single branch point (use beam_branch_analysis)
+inputs:
+- name: ''
+  kind: AnnData
+  description: Cells x genes AnnData with a full DDRTree trajectory already computed (run basic_trajectory first, or load a bundled CDS such as load_paul_cds).
+  requirements: []
+steps:
+- symbol: monocle2py.order_cells
+  purpose: Optional re-anchor — pivot Pseudotime to a chosen progenitor State so every branch shares a common root. State labels are NOT renumbered on re-root, so call order_cells() once (root_state=None) to seed States before passing root_state. (root_state below is the dataset's progenitor State.)
+  args:
+    root_state: 10
+  notes:
+  - 'requires: obsm.X_dr'
+  - 'writes: obs.Pseudotime, obs.State, obs.Parent, uns.monocle2'
+- symbol: monocle2py.plot_complex_cell_trajectory
+  purpose: Reingold–Tilford tree layout of the centroid MST rooted at root_states; clearer than plot_cell_trajectory when many branches overlap in the 2-D DDRTree embedding. (Reads nested uns.monocle2.ddrtree via obsm.X_dr marker.)
+  args:
+    color_by: State
+    root_states:
+    - 10
+    show_branch_points: true
+  notes:
+  - 'requires: obs.State, obsm.X_dr, uns.monocle2'
+- symbol: monocle2py.plot_multiple_branches_pseudotime
+  purpose: Per-gene LOWESS curves for the marker panel, one curve per terminal branch on a shared rescaled [0, 100] pseudotime axis. Pass adata[:, marker_ids]. (Reads nested uns.monocle2.ddrtree via obsm.X_dr marker.)
+  args:
+    branches:
+    - 2
+    - 3
+    - 4
+    branches_name:
+    - fate A
+    - fate B
+    - fate C
+    ncol: 4
+  notes:
+  - branches are terminal State values (1-based) drawn from adata.obs['State'].astype(int).unique(); branches_name must match branches in length or be None.
+  - 'requires: obs.Pseudotime, obs.State, obsm.X_dr, uns.monocle2'
+- symbol: monocle2py.plot_multiple_branches_heatmap
+  purpose: Stitched side-by-side heatmap of every gene smoothed along each terminal branch's root→tip path, annotated by Branch + Cluster. Pass adata[:, gene_ids]. (Reads nested uns.monocle2.ddrtree via obsm.X_dr marker.)
+  args:
+    branches:
+    - 2
+    - 3
+    - 4
+    branches_name:
+    - fate A
+    - fate B
+    - fate C
+    num_clusters: 4
+    show_rownames: false
+  notes:
+  - norm_method defaults to 'vstExprs' (requires a prior estimate_dispersions); pass norm_method='log' if dispersions were not estimated.
+  - 'requires: obs.Pseudotime, obs.State, obsm.X_dr, uns.monocle2'
+templates: []
+outputs:
+- GGPlot - <in-memory> - Complex (tree-layout) trajectory plot.
+- GGPlot - <in-memory> - Faceted per-gene branch-aligned pseudotime curves.
+- pheatmap - <in-memory> - Stitched multi-branch heatmap. Wrap with grid_py to display in notebooks.
